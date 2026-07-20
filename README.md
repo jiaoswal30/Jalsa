@@ -57,7 +57,12 @@ published event's link in a new tab/incognito to experience the guest side.
 | **Pulse** — activity from your circle, no algorithm, no strangers | Pulse tab |
 | **Guest Arrival** — open a shared link as a non-user: reveal → RSVP → convert | any invite link |
 | **Self-contained share links** — the whole invite rides in the URL, backend-free | share anywhere |
+| **Discover** — city-wide public events (gigs, workshops, markets, open mics) across 8 categories, with **circle-crossover FOMO** ("Sana +2 from your circle going"), venue attribution, ticket/price, Going/Save | Discover tab |
 | **PWA** — installable, offline app shell via service worker | when hosted |
+
+**Scene vs. Discover.** Scene is your circle only (no algorithm, no strangers). Discover is the
+public city layer — the PRD's second growth vector and venue-commission revenue stream — kept
+deliberately separate. Pulse (circle activity) moved to the 🔔 in the Scene header.
 
 The circle is alive: seeded Bengaluru friends RSVP to your published events over the first
 couple of minutes, so the host dopamine loop is real from event one.
@@ -73,8 +78,8 @@ css/app.css           app chrome (Midnight / Ember / Pearl / Marigold / Slate)
 css/invites.css       the 3-tier invite design system + reveal animations
 js/engine.js          vibe engine: text → design brief → 3 concepts
 js/templates.js       invite renderers (editorial / poster / split / marquee / chaos / y2k / wall)
-js/store.js           localStorage state, seeded circle, invite link encode/decode
-js/app.js             screens, flows, guest arrival, interactions
+js/store.js           localStorage state, seeded circle + Discover events, link encode/decode
+js/app.js             screens, flows, guest arrival, Discover, interactions
 ```
 
 To start fresh: **You tab → Reset everything**.

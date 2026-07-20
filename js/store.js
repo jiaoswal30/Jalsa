@@ -30,6 +30,43 @@ const Store = (() => {
     });
   }
 
+  /* ---------- Discover: city-wide public events -------------- */
+  const TIERNAMES = ["", "WHISPER", "FLEX", "UNHINGED"];
+  function concept(tier, layout, palette, tagline) {
+    const pal = (typeof Engine !== "undefined" && Engine.PALETTES[palette]) || { bg: "#16100E", ink: "#FAF8F3", a: "#FF4D00", pop: "#E8B531" };
+    return { tier, tierName: TIERNAMES[tier], layout, palette, pal, tagline };
+  }
+  function circle(names) {
+    return names.map(n => { const f = FRIENDS.find(fr => fr.name === n) || { name: n, hue: 200 }; return { name: f.name, hue: f.hue }; });
+  }
+
+  function seedDiscover() {
+    const P = [
+      { t: "BASS COMMUNION", g: "Till the lights come on.", gl: "◆", cat: "Gigs", venue: "The Humming Tree", area: "Indiranagar", price: 499, city: 340, circ: ["Ishaan", "Kabir"], day: 3, h: 21, m: 0, tier: 3, layout: "chaos", pal: "raveChlorophyll", tags: ["techno", "indie", "live"] },
+      { t: "NH7 PREGAME", g: "The festival before the festival.", gl: "◉", cat: "Nightlife", venue: "Warehouse 21", area: "Yeshwantpur", price: 650, city: 512, circ: ["Arjun", "Nikita", "Sana"], day: 6, h: 22, m: 0, tier: 3, layout: "y2k", pal: "desiY2K", tags: ["afterparty", "bass"] },
+      { t: "RISO & RUIN", g: "Two-colour print zine. Bring your mess.", gl: "▤", cat: "Workshops", venue: "Bangalore Creative Circus", area: "Yeshwantpur", price: 800, city: 42, circ: ["Meera"], day: 5, h: 11, m: 0, tier: 2, layout: "split", pal: "forestMustard", tags: ["print", "zine", "hands-on"] },
+      { t: "SOFT LAUNCH", g: "Poetry, acoustic, and nowhere to hide.", gl: "◌", cat: "Open Mic", venue: "Dyu Art Café", area: "Koramangala", price: 0, city: 88, circ: ["Tara", "Diya"], day: 2, h: 19, m: 0, tier: 1, layout: "poster", pal: "koramangalaCoffee", tags: ["spoken word", "acoustic"] },
+      { t: "SUNDAY SOIL", g: "Farmers, makers, and good bread.", gl: "✚", cat: "Markets", venue: "Lal Bagh West Gate", area: "Mavalli", price: 0, city: 210, circ: [], day: 4, h: 8, m: 30, tier: 1, layout: "editorial", pal: "lalbaghDawn", tags: ["market", "slow morning"] },
+      { t: "CLAY & QUIET", g: "Wheel-throwing for the overstimulated.", gl: "❋", cat: "Workshops", venue: "1Shanthiroad Studio", area: "Shanthinagar", price: 1200, city: 24, circ: [], day: 8, h: 16, m: 0, tier: 1, layout: "editorial", pal: "dustyRose", tags: ["ceramics", "slow"] },
+      { t: "SUPPER NO.7", g: "Seven courses. Twelve strangers.", gl: "✱", cat: "Food", venue: "A secret kitchen", area: "Cooke Town", price: 1500, city: 12, circ: ["Advait"], day: 9, h: 20, m: 0, tier: 2, layout: "marquee", pal: "rooftopAmber", tags: ["supper club", "tasting"] },
+      { t: "6AM CLUB", g: "Run, stretch, filter coffee. In that order.", gl: "✿", cat: "Wellness", venue: "Cubbon Park", area: "Central", price: 0, city: 156, circ: ["Rohan"], day: 2, h: 6, m: 0, tier: 1, layout: "poster", pal: "lalbaghDawn", tags: ["run", "sunrise"] },
+      { t: "PRINTED MATTER", g: "A zine fair with teeth.", gl: "✦", cat: "Art", venue: "Maraa Collective", area: "JP Nagar", price: 200, city: 97, circ: ["Meera", "Vivaan"], day: 11, h: 12, m: 0, tier: 3, layout: "wall", pal: "fluorOrange", tags: ["zine", "riso", "art fair"] },
+      { t: "TUNGSTEN NIGHTS", g: "Warm light, warmer records. Vinyl only.", gl: "◭", cat: "Nightlife", venue: "Backdoors", area: "Indiranagar", price: 400, city: 178, circ: ["Sana", "Kabir"], day: 7, h: 21, m: 30, tier: 2, layout: "split", pal: "indiranagarMidnight", tags: ["vinyl", "disco"] },
+    ];
+    return P.map(x => {
+      const d = dayOffset(x.day, x.h, x.m);
+      return {
+        id: "pub-" + uid(), slug: slugify(x.t), public: true,
+        title: x.t, tagline: x.g, glyph: x.gl, typeKey: "generic",
+        category: x.cat, venueName: x.venue, area: x.area, priceFrom: x.price,
+        cityGoing: x.city, circleGoing: circle(x.circ),
+        concept: concept(x.tier, x.layout, x.pal, x.g),
+        date: d.date, time: d.time, tags: x.tags,
+        rsvps: [], updates: [], photos: [], createdAt: Date.now(),
+      };
+    });
+  }
+
   function seed() {
     const e1t = dayOffset(2, 17, 30), e2t = dayOffset(5, 20, 0), e3t = dayOffset(9, 11, 0), p1t = dayOffset(-6, 19, 0), p2t = dayOffset(-16, 20, 30);
 
@@ -101,13 +138,23 @@ const Store = (() => {
       ],
       myRsvps: {},   // eventId -> status
       myPaid: {},    // eventId -> bool
+      discover: seedDiscover(),
+      discoverState: {}, // pubId -> 'going' | 'saved'
     };
+  }
+
+  function migrate(s) {
+    // additive migrations so existing installs gain new sections
+    if (!s.discover || !s.discover.length) s.discover = seedDiscover();
+    if (!s.discoverState) s.discoverState = {};
+    if (!s.guestRsvps) s.guestRsvps = {};
+    return s;
   }
 
   function load() {
     try {
       const raw = localStorage.getItem(KEY);
-      if (raw) { state = JSON.parse(raw); return state; }
+      if (raw) { state = migrate(JSON.parse(raw)); return state; }
     } catch (e) { /* corrupted -> reseed */ }
     state = seed();
     save();
@@ -127,6 +174,8 @@ const Store = (() => {
 
   function get() { return state; }
   function ev(id) { return state.events.find(e => e.id === id); }
+  function discover() { return (state.discover || []).slice().sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time)); }
+  function discoverEv(id) { return (state.discover || []).find(e => e.id === id); }
   function upcoming() { return state.events.filter(e => !isPast(e)).sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time)); }
   function past() { return state.events.filter(isPast).sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time)); }
   function isPast(e) {
@@ -187,5 +236,5 @@ const Store = (() => {
     } catch (e) { return null; }
   }
 
-  return { load, save, reset, get, ev, upcoming, past, isPast, addPulse, addSharedEvent, encodeEvent, decodeEvent, FRIENDS, uid, slugify, dayOffset };
+  return { load, save, reset, get, ev, upcoming, past, isPast, discover, discoverEv, addPulse, addSharedEvent, encodeEvent, decodeEvent, FRIENDS, uid, slugify, dayOffset };
 })();

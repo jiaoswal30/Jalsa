@@ -74,7 +74,7 @@
     if (to === "create") { openCreate(); return; }
     currentNav = to;
     $$(".tab", tabbar).forEach(t => t.classList.toggle("active", t.dataset.nav === to));
-    const renderers = { feed: renderFeed, memories: renderMemories, pulse: renderPulse, profile: renderProfile };
+    const renderers = { feed: renderFeed, discover: renderDiscover, memories: renderMemories, pulse: renderPulse, profile: renderProfile };
     (renderers[to] || renderFeed)();
   }
 
@@ -210,7 +210,13 @@
           <h1>The Scene</h1>
           <div class="sub">Bengaluru · your circle only</div>
         </div>
-        <div class="wordmark">JALSA<span class="dev">जलसा</span></div>
+        <div class="head-right">
+          <button class="bell" id="pulse-bell" aria-label="Pulse">
+            <svg viewBox="0 0 24 24"><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>
+            ${S.pulse.length ? `<span class="bell-dot"></span>` : ""}
+          </button>
+          <div class="wordmark">JALSA<span class="dev">जलसा</span></div>
+        </div>
       </div>
       <div class="ticker"><div class="ticker-inner">${tick.repeat(2)}</div></div>
       <div class="feed" id="feed">
@@ -222,6 +228,8 @@
       </div>`);
     bindFeed();
     startCountdowns();
+    const bell = $("#pulse-bell");
+    if (bell) bell.onclick = () => { haptic(8); openPulseOverlay(); };
   }
 
   function feedCard(ev, i) {
@@ -397,8 +405,9 @@
         </div>
       </div>`);
 
-    // render the invite artwork
-    const slot = $("#inv-slot", ov);
+    // render the invite artwork (query by class, not id — a closing overlay
+    // may still hold a duplicate #inv-slot while it animates out)
+    const slot = ov.querySelector(".invite-wrap");
     const invEl = Templates.render(ev, ev.concept, { reveal });
     slot.appendChild(invEl);
     haptic(reveal ? [8, 60, 8] : 6);
@@ -943,21 +952,227 @@
   /* ============================================================
      PULSE
      ============================================================ */
+  const pulseBody = () => `
+    <div class="pagepad" style="padding-top:6px">
+      ${S.pulse.map(p => `
+        <div class="pulse-item">
+          <div class="av" style="background:var(--midnight-3);margin:0;border-color:transparent">✦</div>
+          <div class="ptxt">${p.text}<div class="pwhen">${timeAgo(p.at)}</div></div>
+        </div>`).join("")}
+      <div class="spacer"></div>
+      <p class="mic-note">ONLY YOUR PEOPLE. NO ALGORITHM. NO STRANGERS.</p>
+    </div>`;
+
   function renderPulse() {
     setScreen(`
       <div class="apphead">
         <div><h1>Pulse</h1><div class="sub">what your circle is up to</div></div>
         <div class="wordmark">JALSA<span class="dev">जलसा</span></div>
       </div>
-      <div class="pagepad">
-        ${S.pulse.map(p => `
-          <div class="pulse-item">
-            <div class="av" style="background:var(--midnight-3);margin:0;border-color:transparent">✦</div>
-            <div class="ptxt">${p.text}<div class="pwhen">${timeAgo(p.at)}</div></div>
-          </div>`).join("")}
-        <div class="spacer"></div>
-        <p class="mic-note">ONLY YOUR PEOPLE. NO ALGORITHM. NO STRANGERS.</p>
+      ${pulseBody()}`);
+  }
+
+  function openPulseOverlay() {
+    const ov = openOverlay(`
+      <div class="ov-top">${backBtn}<span class="ov-title">Pulse</span><span style="width:40px"></span></div>
+      <div class="ov-scroll">${pulseBody()}</div>`);
+    ov.querySelector("[data-close]").onclick = () => closeOverlay(ov);
+  }
+
+  /* ============================================================
+     DISCOVER — the city layer (public events, venues, tickets)
+     Second growth vector: FOMO crossover with your circle.
+     ============================================================ */
+  const DISCOVER_CATS = ["All", "Gigs", "Nightlife", "Workshops", "Open Mic", "Markets", "Art", "Food", "Wellness"];
+  let discoverFilter = "All";
+
+  function priceLabel(n) { return n > 0 ? `₹${n}` : "FREE"; }
+
+  function renderDiscover() {
+    const all = Store.discover();
+    const list = discoverFilter === "All" ? all : all.filter(e => e.category === discoverFilter);
+    const featured = discoverFilter === "All" ? all.slice().sort((a, b) => b.cityGoing - a.cityGoing)[0] : null;
+    const rest = featured ? list.filter(e => e.id !== featured.id) : list;
+
+    setScreen(`
+      <div class="apphead">
+        <div><h1>Discover</h1><div class="sub">what Bengaluru is doing this week</div></div>
+        <div class="wordmark">JALSA<span class="dev">जलसा</span></div>
+      </div>
+      <div class="chiprow scroll" id="disc-cats" style="margin-bottom:14px">
+        ${DISCOVER_CATS.map(c => `<button class="chip ${c === discoverFilter ? "on" : ""}" data-cat="${c}">${c}</button>`).join("")}
+      </div>
+      <div class="feed" id="disc-feed">
+        ${featured ? featuredCard(featured) : ""}
+        ${rest.length || featured
+          ? rest.map((e, i) => discoverCard(e, i)).join("")
+          : `<div class="empty"><div class="big">Nothing in ${esc(discoverFilter)} yet.</div><p>Try another category — the city's always got something on.</p></div>`}
+        <p class="mic-note" style="padding:8px 0 0">PUBLIC EVENTS · POWERED BY BENGALURU VENUES</p>
       </div>`);
+
+    $("#disc-cats").onclick = e => {
+      const c = e.target.closest("[data-cat]"); if (!c) return;
+      discoverFilter = c.dataset.cat; haptic(6); renderDiscover();
+    };
+    $("#disc-feed").onclick = e => {
+      const card = e.target.closest("[data-disc]");
+      if (card) { openDiscover(card.dataset.disc); return; }
+    };
+  }
+
+  function circleGoingHTML(ev) {
+    const cg = ev.circleGoing || [];
+    if (!cg.length) return `<span class="going-label"><b>${ev.cityGoing}</b> going in the city</span>`;
+    const avs = cg.slice(0, 3).map((r, i) => avatarHTML(r, i)).join("");
+    const names = cg.length === 1 ? cg[0].name : `${cg[0].name} +${cg.length - 1}`;
+    return `<div style="display:flex;align-items:center"><div class="avstack">${avs}</div><span class="going-label"><b style="color:var(--ember)">${esc(names)}</b> from your circle</span></div>`;
+  }
+
+  function featuredCard(ev) {
+    const st = S.discoverState[ev.id];
+    return `
+    <article class="featured" data-disc="${ev.id}">
+      <div class="feat-hero" style="${Templates.heroStyle(ev.concept)}">
+        <span class="feat-flag">🔥 MOST WANTED IN BLR</span>
+        <span class="fc-type">${ev.glyph} ${esc(ev.category)} · ${esc(ev.venueName)}</span>
+        <div>
+          <div class="feat-title" style="${Templates.heroTitleStyle(ev.concept)}">${esc(ev.title)}</div>
+          <div class="fc-tag">${esc(ev.tagline)}</div>
+        </div>
+        <span class="feat-price">${priceLabel(ev.priceFrom)}</span>
+      </div>
+      <div class="fc-body">
+        <div class="fc-meta">
+          <span>🗓 <b>${whenLine(ev)}</b></span>
+          <span>📍 <b>${esc(ev.area)}</b></span>
+        </div>
+        <div class="fc-foot">
+          ${circleGoingHTML(ev)}
+          <button class="btn btn-ember btn-sm" data-disc="${ev.id}">${st === "going" ? "Going ✓" : "See it →"}</button>
+        </div>
+      </div>
+    </article>`;
+  }
+
+  function discoverCard(ev, i) {
+    const st = S.discoverState[ev.id];
+    return `
+    <article class="feedcard disc-card" style="--i:${i}" data-disc="${ev.id}">
+      <div class="disc-row">
+        <div class="disc-thumb" style="${Templates.heroStyle(ev.concept)}">
+          <span class="disc-glyph" style="color:${ev.concept.pal.a}">${ev.glyph}</span>
+          <span class="disc-price">${priceLabel(ev.priceFrom)}</span>
+        </div>
+        <div class="disc-info">
+          <div class="disc-cat">${esc(ev.category)} · ${esc(ev.area)}</div>
+          <div class="disc-title">${esc(ev.title)}</div>
+          <div class="disc-venue">${esc(ev.venueName)} · ${whenLine(ev)}</div>
+          <div class="disc-foot">
+            ${(ev.circleGoing && ev.circleGoing.length)
+              ? `<span class="disc-crossover"><b>${esc(ev.circleGoing[0].name)}${ev.circleGoing.length > 1 ? " +" + (ev.circleGoing.length - 1) : ""}</b> going</span>`
+              : `<span class="disc-city">${ev.cityGoing} going</span>`}
+            ${st === "going" ? `<span class="disc-tag going">GOING ✓</span>` : st === "saved" ? `<span class="disc-tag saved">SAVED</span>` : ""}
+          </div>
+        </div>
+      </div>
+    </article>`;
+  }
+
+  function openDiscover(id, reveal = true) {
+    const ev = Store.discoverEv(id);
+    if (!ev) return;
+    const st = S.discoverState[id];
+    const paid = ev.priceFrom > 0;
+
+    const ov = openOverlay(`
+      <div class="viewer ov-scroll">
+        <div class="invite-wrap" id="disc-slot"></div>
+        <div class="viewer-actions">
+          ${backBtn}
+          <button class="icon-btn" data-share aria-label="Share"><svg viewBox="0 0 24 24"><path d="M12 15V4m0 0L8 8m4-4 4 4"/><path d="M5 13v6a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-6"/></svg></button>
+        </div>
+        <div class="sheet detail-sheet">
+          <div class="grab"></div>
+          <div class="disc-badge">${esc(ev.category)}</div>
+          <div class="ds-title">${esc(ev.title)}</div>
+          <div class="ds-host">${esc(ev.venueName)} · ${esc(ev.area)}, Bengaluru</div>
+
+          <div class="ds-grid">
+            <div class="ds-cell tap" data-ics><div class="k">When · tap to save</div><div class="v">${whenLine(ev)} <span class="go">＋ CAL</span></div></div>
+            <div class="ds-cell tap" data-maps><div class="k">Where · tap for maps</div><div class="v">${esc(ev.venueName)} <span class="go">↗ MAP</span></div></div>
+          </div>
+
+          <div class="upi-card">
+            <div class="amt">${priceLabel(ev.priceFrom)}</div>
+            <div class="why">${paid ? "entry / cover · pay at the venue or grab tickets online" : "no cover · just show up and vibe"}<br><span style="font-family:var(--font-mono);font-size:9px;letter-spacing:.06em">${(ev.tags || []).map(t => "#" + t).join("  ")}</span></div>
+          </div>
+
+          <div class="section-label">Who's going</div>
+          <div class="disc-going">
+            <div class="avstack">${(ev.circleGoing || []).map((r, i) => avatarHTML(r, i)).join("") || ""}</div>
+            <div class="disc-going-txt">
+              ${(ev.circleGoing && ev.circleGoing.length)
+                ? `<b>${ev.circleGoing.map(c => c.name).join(", ")}</b> from your circle${st === "going" ? " · and you" : ""}<br>`
+                : ""}
+              <span style="color:var(--slate-2)">${ev.cityGoing + (st === "going" ? 1 : 0)} going across Bengaluru</span>
+            </div>
+          </div>
+
+          <div class="section-label">Your move</div>
+          <div class="rsvp-row">
+            <button class="rsvp-btn ${st === "going" ? "sel-yes" : ""}" data-go>${st === "going" ? (paid ? "Going ✓" : "In ✓") : (paid ? `Get tickets · ₹${ev.priceFrom}` : "I'm going")}</button>
+            <button class="rsvp-btn ${st === "saved" ? "sel-maybe" : st === "going" ? "dim" : ""}" data-save>${st === "saved" ? "Saved" : "Save"}</button>
+          </div>
+          <div class="spacer"></div>
+          <button class="btn btn-line" data-share>Share this with your circle</button>
+          <div class="spacer"></div>
+        </div>
+      </div>`);
+
+    ov.querySelector(".invite-wrap").appendChild(Templates.render(ev, ev.concept, { reveal }));
+    if (reveal) haptic([8, 60, 8]);
+
+    ov.onclick = e => {
+      if (e.target.closest("[data-close]")) { closeOverlay(ov); if (currentNav === "discover") renderDiscover(); return; }
+      if (e.target.closest("[data-share]")) { shareDiscover(ev); return; }
+      if (e.target.closest("[data-ics]")) { downloadICS({ ...ev, venue: ev.venueName + ", " + ev.area }); return; }
+      if (e.target.closest("[data-maps]")) { openMaps({ venue: ev.venueName + " " + ev.area }); return; }
+      const go = e.target.closest("[data-go]");
+      if (go) {
+        if (S.discoverState[id] === "going") { delete S.discoverState[id]; Store.save(); haptic(8); }
+        else {
+          S.discoverState[id] = "going"; Store.save(); haptic(35); burst(go);
+          Store.addPulse(`<b>You</b> are going to <b>${esc(ev.title)}</b> at ${esc(ev.venueName)}`);
+          toast(paid ? `Nice. Tickets open on ${esc(ev.venueName)}'s page — you're marked going.` : `You're going. ${(ev.circleGoing[0] || {}).name || "The city"} will be happy.`);
+        }
+        closeOverlay(ov); openDiscover(id, false); return;
+      }
+      const sv = e.target.closest("[data-save]");
+      if (sv) {
+        if (S.discoverState[id] === "saved") delete S.discoverState[id];
+        else S.discoverState[id] = "saved";
+        Store.save(); haptic(10);
+        closeOverlay(ov); openDiscover(id, false); return;
+      }
+    };
+  }
+
+  function shareDiscover(ev) {
+    const d = new Date(ev.date + "T00:00");
+    const when = d.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" });
+    const text = [
+      `*${ev.title}* ${ev.glyph}`,
+      ev.tagline,
+      ``,
+      `📍 ${ev.venueName}, ${ev.area}`,
+      `🗓 ${when} · ${Engine.formatTime(ev.time)} · ${priceLabel(ev.priceFrom)}`,
+      ``,
+      `Found on JALSA Discover — Bengaluru's on.`,
+    ].join("\n");
+    haptic(10);
+    if (navigator.share) { navigator.share({ title: ev.title, text }).catch(() => {}); return; }
+    window.open("https://wa.me/?text=" + encodeURIComponent(text), "_blank");
+    navigator.clipboard?.writeText(text).then(() => toast("Copied — spread the word.")).catch(() => {});
   }
 
   /* ============================================================

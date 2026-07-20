@@ -740,6 +740,86 @@ input,textarea,select{font-family:inherit;color:inherit}
 .manifesto .who{font-family:var(--font-mono);font-style:normal;font-size:9px;letter-spacing:.22em;color:var(--slate-2);margin-top:12px;text-transform:uppercase}
 
 /* ============================================================
+   SCENE HEADER BELL (Pulse)
+   ============================================================ */
+.head-right{display:flex;align-items:center;gap:12px}
+.bell{
+  position:relative;width:38px;height:38px;border-radius:12px;
+  background:var(--card);border:1px solid var(--line);
+  display:flex;align-items:center;justify-content:center;
+  transition:transform .25s var(--spring);
+}
+.bell:active{transform:scale(.88)}
+.bell svg{width:19px;height:19px;fill:none;stroke:var(--pearl);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.bell-dot{position:absolute;top:8px;right:9px;width:7px;height:7px;border-radius:50%;background:var(--ember);border:1.5px solid var(--midnight)}
+
+/* ============================================================
+   DISCOVER — the city layer
+   ============================================================ */
+/* featured hero */
+.featured{
+  margin:0 16px 20px;border-radius:24px;overflow:hidden;
+  border:1px solid var(--line);background:var(--midnight-2);
+  animation:cardIn .6s var(--swift) both;
+}
+.feat-hero{
+  position:relative;height:260px;padding:18px;
+  display:flex;flex-direction:column;justify-content:space-between;
+}
+.feat-flag{
+  position:absolute;top:14px;right:14px;
+  font-family:var(--font-mono);font-size:9px;letter-spacing:.16em;
+  padding:6px 11px;border-radius:999px;color:#fff;
+  background:rgba(0,0,0,.4);border:1px solid rgba(255,255,255,.18);backdrop-filter:blur(6px);
+}
+.feat-title{font-size:40px;line-height:.95;letter-spacing:-.01em;max-width:92%;word-break:break-word}
+.feat-price{
+  align-self:flex-start;
+  font-family:var(--font-mono);font-size:11px;letter-spacing:.12em;font-weight:700;
+  padding:6px 12px;border-radius:999px;
+  background:rgba(0,0,0,.36);border:1px solid rgba(255,255,255,.2);backdrop-filter:blur(6px);
+}
+
+/* list cards */
+.disc-card{padding:12px}
+.disc-row{display:flex;gap:14px;align-items:stretch}
+.disc-thumb{
+  position:relative;flex:none;width:96px;border-radius:15px;overflow:hidden;
+  display:flex;align-items:center;justify-content:center;
+}
+.disc-glyph{font-size:34px}
+.disc-price{
+  position:absolute;bottom:6px;left:6px;
+  font-family:var(--font-mono);font-size:8px;letter-spacing:.1em;font-weight:700;
+  padding:3px 6px;border-radius:6px;background:rgba(0,0,0,.5);color:#fff;
+}
+.disc-info{flex:1;min-width:0;padding:3px 2px;display:flex;flex-direction:column;gap:3px}
+.disc-cat{font-family:var(--font-mono);font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--marigold)}
+.disc-title{font-family:var(--font-display);font-weight:800;font-size:18px;letter-spacing:-.01em;line-height:1.05}
+.disc-venue{font-size:11.5px;color:var(--slate-2);line-height:1.35}
+.disc-foot{margin-top:auto;display:flex;align-items:center;gap:9px;flex-wrap:wrap;padding-top:5px}
+.disc-crossover{font-size:11px;color:var(--slate-2)}
+.disc-crossover b{color:var(--ember);font-weight:700}
+.disc-city{font-family:var(--font-mono);font-size:9.5px;letter-spacing:.08em;color:var(--slate)}
+.disc-tag{
+  font-family:var(--font-mono);font-size:8.5px;letter-spacing:.14em;
+  padding:3px 8px;border-radius:999px;border:1px solid;
+}
+.disc-tag.going{color:var(--ok);border-color:rgba(111,207,151,.4);background:rgba(111,207,151,.09)}
+.disc-tag.saved{color:var(--marigold);border-color:rgba(232,181,49,.4);background:rgba(232,181,49,.09)}
+
+/* discover detail */
+.disc-badge{
+  display:inline-block;margin-bottom:9px;
+  font-family:var(--font-mono);font-size:9px;letter-spacing:.2em;text-transform:uppercase;
+  color:var(--marigold);padding:5px 11px;border-radius:999px;
+  background:rgba(232,181,49,.1);border:1px solid rgba(232,181,49,.28);
+}
+.disc-going{display:flex;align-items:center;gap:12px;margin-bottom:4px}
+.disc-going-txt{font-size:12.5px;line-height:1.5}
+.disc-going-txt b{color:var(--pearl)}
+
+/* ============================================================
    GUEST ARRIVAL — the viral loop landing (opened from a link)
    ============================================================ */
 .arrival{position:absolute;inset:0;display:flex;flex-direction:column;background:var(--midnight);overflow:hidden}
