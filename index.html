@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+<title>JALSA — the place your moments live</title>
+<meta name="description" content="AI-designed invites. WhatsApp-native RSVP. UPI collection. The place your moments live.">
+<meta name="theme-color" content="#0D0B1E">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="JALSA">
+<link rel="apple-touch-icon" href="icon.svg">
+<meta property="og:title" content="JALSA — the invite IS the event">
+<meta property="og:description" content="Someone made you a jalsa. Tap to see it.">
+<meta property="og:type" content="website">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=Space+Grotesk:wght@400;500;700&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,700;1,9..40,400&family=Fragment+Mono:ital@0;1&family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Bebas+Neue&family=Playfair+Display:ital,wght@0,400;0,600;1,400;1,600&family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,700;12..96,800&family=Noto+Sans+Devanagari:wght@400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/app.css">
+<link rel="stylesheet" href="css/invites.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230D0B1E'/><text x='50' y='68' font-size='52' text-anchor='middle' fill='%23FF4D00' font-family='Georgia' font-weight='bold'>J</text></svg>">
+</head>
+<body>
+  <div id="stage">
+    <div id="app">
+      <!-- screens are rendered here -->
+      <main id="screen"></main>
+
+      <nav id="tabbar" class="hidden" aria-label="Main">
+        <button class="tab" data-nav="feed" aria-label="Scene">
+          <svg viewBox="0 0 24 24"><path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-4.5v-6h-5v6H5a1 1 0 0 1-1-1Z"/></svg>
+          <span>Scene</span>
+        </button>
+        <button class="tab" data-nav="memories" aria-label="Rewind">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.2"/><path d="M12 7.5V12l3 2"/></svg>
+          <span>Rewind</span>
+        </button>
+        <button id="fab" data-nav="create" aria-label="Create event">
+          <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+        </button>
+        <button class="tab" data-nav="pulse" aria-label="Pulse">
+          <svg viewBox="0 0 24 24"><path d="M3 12h4l2.5-6 4 12 2.5-6H21"/></svg>
+          <span>Pulse</span>
+        </button>
+        <button class="tab" data-nav="profile" aria-label="You">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="3.6"/><path d="M4.8 20c1.4-3.6 4-5.2 7.2-5.2s5.8 1.6 7.2 5.2"/></svg>
+          <span>You</span>
+        </button>
+      </nav>
+    </div>
+
+    <div id="overlay-root"></div>
+    <div id="toast-root"></div>
+    <div class="grain" aria-hidden="true"></div>
+  </div>
+
+  <script src="js/engine.js"></script>
+  <script src="js/templates.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

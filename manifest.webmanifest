@@ -1,0 +1,17 @@
+{
+  "name": "JALSA — the place your moments live",
+  "short_name": "JALSA",
+  "description": "AI-designed invites. WhatsApp-native RSVP. UPI collection. Your circle only.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0D0B1E",
+  "theme_color": "#0D0B1E",
+  "categories": ["social", "lifestyle", "events"],
+  "lang": "en-IN",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "icon-maskable.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}

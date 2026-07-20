@@ -1,0 +1,13 @@
+# OS
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# Local Claude Code state (machine-specific)
+.claude/settings.local.json
+
+# Dependencies (none currently, but future-proof)
+node_modules/
+
+# Logs / temp
+*.log
