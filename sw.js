@@ -1,9 +1,9 @@
 /* JALSA service worker — offline app shell */
-const CACHE = "jalsa-v2";
+const CACHE = "jalsa-v3";
 const ASSETS = [
   "./", "./index.html",
-  "./css/app.css", "./css/invites.css",
-  "./js/engine.js", "./js/templates.js", "./js/store.js", "./js/app.js",
+  "./css/app.css?v=3", "./css/invites.css?v=3",
+  "./js/engine.js?v=3", "./js/templates.js?v=3", "./js/store.js?v=3", "./js/app.js?v=3",
   "./manifest.webmanifest", "./icon.svg", "./icon-maskable.svg",
 ];
 
