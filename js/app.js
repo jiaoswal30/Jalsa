@@ -252,6 +252,7 @@
         <div class="fc-meta">
           <span>🗓 <b>${whenLine(ev)}</b></span>
           <span>📍 <b>${esc(ev.venue || "TBD")}</b></span>
+          ${ev.audience && ev.audience.mode === "some" ? `<span class="fc-private">🔒 ${ev.audience.names.length ? esc(ev.audience.names.slice(0, 2).join(", ")) + (ev.audience.names.length > 2 ? ` +${ev.audience.names.length - 2}` : "") : "Chosen ones"}</span>` : ""}
           ${spotsLeft !== null && spotsLeft <= 5 && spotsLeft > 0 ? `<span style="color:var(--ember)">🔥 ${spotsLeft} spots left. You know what to do.</span>` : ""}
         </div>
         <div class="fc-foot">
@@ -513,6 +514,9 @@
 
   function openCreate() {
     let brief = null, picked = 0, reroll = 0, lastText = "";
+    let customTitle = null;                 // manual title override
+    let origSnapshot = null;                // pristine design, for "reset"
+    let audience = { mode: "all", names: [] };
 
     const ov = openOverlay(`
       <div class="ov-top">${backBtn}<span class="ov-title">New Jalsa</span><span style="width:40px"></span></div>
@@ -593,6 +597,8 @@
     /* ---- step 3 : pick a concept ----------------------------- */
     function stepConcepts(text) {
       picked = 0;
+      origSnapshot = null;      // fresh designs → drop any prior customisation snapshot
+      customTitle = null;
       const draft = draftEvent(text);
       stage.innerHTML = `
         <div class="concepts">
@@ -640,7 +646,7 @@
       $("#use-btn", stage).onclick = () => {
         S.profile.tierPicks[brief.concepts[picked].tier]++;
         Store.save(); haptic(14);
-        stepDetails(text);
+        stepCustomize(text);
       };
       $("#reroll-btn", stage).onclick = () => { reroll += 17; haptic(8); stepGenerate(text); };
     }
@@ -653,6 +659,160 @@
       };
     }
 
+    /* ---- step 3.5 : make it yours (manual editor) ------------ */
+    function colourInput(key, label, val) {
+      const v = hex6(val);
+      return `<label class="swatch">
+        <input type="color" data-k="${key}" value="${v}">
+        <span class="sw-lab">${label}</span><span class="hex">${v.toUpperCase()}</span>
+      </label>`;
+    }
+
+    function stepCustomize(text) {
+      const c = brief.concepts[picked];        // edited in place
+      const d = draftEvent(text);
+      if (customTitle == null) customTitle = brief.title;
+      if (!origSnapshot) origSnapshot = JSON.parse(JSON.stringify({ pal: c.pal, tagline: c.tagline, title: brief.title }));
+
+      stage.innerHTML = `
+        <div class="create-body" style="padding-bottom:4px">
+          <h2 class="create-h">Make it <span style="color:var(--ember)">yours</span>.</h2>
+          <p class="create-sub">Edit the words, tune the colours, or drop an inspo pic and we'll pull a palette from it.</p>
+        </div>
+        <div class="editor">
+          <div class="editor-preview"><div class="ed-frame" id="ed-frame"></div></div>
+          <div class="editor-controls">
+            <div class="field"><label>Title</label><input id="ed-title" maxlength="40" value="${esc(customTitle)}"></div>
+            <div class="field"><label>Tagline</label><input id="ed-tag" maxlength="60" value="${esc(c.tagline)}"></div>
+            <div class="section-label">Colours</div>
+            <div class="swatch-row" id="ed-colours">
+              ${colourInput("bg", "Background", c.pal.bg)}
+              ${colourInput("ink", "Text", c.pal.ink)}
+              ${colourInput("a", "Accent", c.pal.a)}
+              ${colourInput("pop", "Highlight", c.pal.pop || c.pal.a)}
+            </div>
+            <div class="section-label">Inspiration</div>
+            <label class="inspo-drop">
+              <input type="file" id="inspo-file" accept="image/*" hidden>
+              <span id="inspo-label">＋ Add an inspo picture — we'll suggest a palette</span>
+            </label>
+            <div class="inspo-suggest" id="inspo-suggest" hidden></div>
+          </div>
+        </div>
+        <div class="create-body" style="padding-top:0">
+          <button class="btn btn-ember" id="ed-next">Next — the details →</button>
+          <div class="spacer"></div>
+          <button class="btn btn-line" id="ed-reset">↺ Back to the original design</button>
+        </div>`;
+
+      const frame = $("#ed-frame", stage);
+      function repaint() {
+        frame.innerHTML = "";
+        const preview = Object.assign({}, d, { title: (customTitle || "").toUpperCase() || "YOUR JALSA" });
+        const inv = Templates.render(preview, c);
+        frame.appendChild(inv);
+        requestAnimationFrame(() => { inv.style.transform = `scale(${frame.clientWidth / 340})`; });
+      }
+      repaint();
+
+      $("#ed-title", stage).oninput = e => { customTitle = e.target.value; repaint(); };
+      $("#ed-tag", stage).oninput = e => { c.tagline = e.target.value; repaint(); };
+      $("#ed-colours", stage).oninput = e => {
+        const key = e.target.dataset.k; if (!key) return;
+        c.pal[key] = e.target.value;
+        const lab = e.target.parentElement.querySelector(".hex"); if (lab) lab.textContent = e.target.value.toUpperCase();
+        repaint();
+      };
+
+      function syncColourInputs() {
+        [["bg", c.pal.bg], ["ink", c.pal.ink], ["a", c.pal.a], ["pop", c.pal.pop]].forEach(([k, v]) => {
+          const inp = stage.querySelector(`input[data-k="${k}"]`);
+          if (inp) { inp.value = hex6(v); const lab = inp.parentElement.querySelector(".hex"); if (lab) lab.textContent = hex6(v).toUpperCase(); }
+        });
+      }
+
+      const fileIn = $("#inspo-file", stage);
+      fileIn.onchange = () => {
+        const f = fileIn.files && fileIn.files[0]; if (!f) return;
+        $("#inspo-label", stage).textContent = "Reading colours…";
+        extractPalette(f).then(cols => {
+          const [bg, ink, a, pop] = mapInspo(cols);
+          const box = $("#inspo-suggest", stage); box.hidden = false;
+          box.innerHTML = `
+            <div class="inspo-swatches">${cols.map(h => `<span style="background:${h}"></span>`).join("")}</div>
+            <p class="inspo-note">Pulled from your pic — a <b style="color:${a}">${a.toUpperCase()}</b> accent over <b>${bg.toUpperCase()}</b>.</p>
+            <button class="btn btn-ghost" id="inspo-apply">Apply this palette →</button>`;
+          $("#inspo-label", stage).textContent = "✓ Palette ready below";
+          $("#inspo-apply", stage).onclick = () => {
+            c.pal.bg = bg; c.pal.ink = ink; c.pal.a = a; c.pal.pop = pop;
+            syncColourInputs(); repaint(); haptic(14);
+            toast("Palette applied from your inspo pic.");
+          };
+        }).catch(() => { $("#inspo-label", stage).textContent = "Couldn't read that image — try another"; });
+      };
+
+      $("#ed-next", stage).onclick = () => { haptic(12); stepDetails(text); };
+      $("#ed-reset", stage).onclick = () => {
+        c.pal = JSON.parse(JSON.stringify(origSnapshot.pal));
+        c.tagline = origSnapshot.tagline;
+        customTitle = origSnapshot.title;
+        haptic(8); stepCustomize(text);
+      };
+    }
+
+    /* pull a small dominant-colour palette out of an uploaded image */
+    function extractPalette(file) {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+          try {
+            const cv = document.createElement("canvas");
+            const w = cv.width = 64, h = cv.height = 64;
+            const ctx = cv.getContext("2d");
+            ctx.drawImage(img, 0, 0, w, h);
+            const data = ctx.getImageData(0, 0, w, h).data;
+            const buckets = {};
+            for (let i = 0; i < data.length; i += 4) {
+              if (data[i + 3] < 125) continue;
+              const key = (data[i] >> 5) + "," + (data[i + 1] >> 5) + "," + (data[i + 2] >> 5);
+              const bk = buckets[key] || (buckets[key] = { n: 0, r: 0, g: 0, b: 0 });
+              bk.n++; bk.r += data[i]; bk.g += data[i + 1]; bk.b += data[i + 2];
+            }
+            const top = Object.values(buckets).sort((a, b) => b.n - a.n).slice(0, 6)
+              .map(bk => rgbToHex(bk.r / bk.n, bk.g / bk.n, bk.b / bk.n));
+            URL.revokeObjectURL(img.src);
+            top.length ? resolve(top) : reject();
+          } catch (e) { reject(e); }
+        };
+        img.onerror = reject;
+        img.src = URL.createObjectURL(file);
+      });
+    }
+
+    /* map extracted colours to bg / ink / accent / pop, kept legible & dark */
+    function mapInspo(cols) {
+      const rgb = hexRgb, lum = h => { const [r, g, b] = rgb(h); return .2126 * r + .7152 * g + .0722 * b; };
+      const sat = h => { const [r, g, b] = rgb(h); const mx = Math.max(r, g, b), mn = Math.min(r, g, b); return mx ? (mx - mn) / mx : 0; };
+      const byLum = [...cols].sort((a, b) => lum(a) - lum(b));
+      const bySat = [...cols].sort((a, b) => sat(b) - sat(a));
+      let bg = byLum[0];
+      if (lum(bg) > 120) { const [r, g, b] = rgb(bg); bg = rgbToHex(r * .32, g * .32, b * .34); }  // force a dark canvas
+      const light = byLum[byLum.length - 1];
+      const ink = lum(light) > 190 ? light : "#FAF8F3";
+      const a = bySat[0] || ink;
+      const pop = bySat[1] || a;
+      return [bg, ink, a, pop];
+    }
+
+    function hexRgb(h) { const n = parseInt(hex6(h).slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
+    function rgbToHex(r, g, b) { return "#" + [r, g, b].map(x => Math.max(0, Math.min(255, Math.round(x))).toString(16).padStart(2, "0")).join(""); }
+    function hex6(v) {
+      v = String(v || "").trim();
+      if (/^#[0-9a-fA-F]{6}$/.test(v)) return v;
+      if (/^#[0-9a-fA-F]{3}$/.test(v)) return "#" + v.slice(1).split("").map(c => c + c).join("");
+      return "#141018";
+    }
+
     /* ---- step 4 : details ------------------------------------ */
     function stepDetails(text) {
       const d = draftEvent(text);
@@ -661,7 +821,7 @@
         <div class="create-body">
           <h2 class="create-h">Lock the details.</h2>
           <p class="create-sub">The design is done. Now the logistics — this is the part WhatsApp always loses.</p>
-          <div class="field"><label>Event name</label><input id="f-title" maxlength="40" value="${esc(brief.title)}"></div>
+          <div class="field"><label>Event name</label><input id="f-title" maxlength="40" value="${esc(customTitle || brief.title)}"></div>
           <div class="fieldrow">
             <div class="field"><label>Date</label><input id="f-date" type="date" value="${d.date}"></div>
             <div class="field"><label>Time</label><input id="f-time" type="time" value="${d.time}"></div>
@@ -672,12 +832,33 @@
             <div class="field"><label>₹ per head (0 = free)</label><input id="f-upi" type="number" min="0" max="99999" value="0"></div>
           </div>
           <div class="field" id="upi-id-wrap" style="display:none"><label>Your UPI ID (money lands here)</label><input id="f-upiid" placeholder="yourname@oksbi"></div>
+          <div class="section-label" style="margin:4px 0 10px">Who's it for?</div>
+          <div class="aud-toggle" id="aud-toggle">
+            <button class="aud-opt ${audience.mode === "all" ? "on" : ""}" data-m="all"><b>Everyone</b><span>your whole circle sees it</span></button>
+            <button class="aud-opt ${audience.mode === "some" ? "on" : ""}" data-m="some"><b>Chosen ones</b><span>only people you pick</span></button>
+          </div>
+          <div class="aud-people" id="aud-people" ${audience.mode === "some" ? "" : "hidden"}>
+            ${Store.FRIENDS.map(f => `<button class="aud-chip ${audience.names.includes(f.name) ? "on" : ""}" data-n="${esc(f.name)}"><i style="background:hsl(${f.hue} 70% 55%)"></i>${esc(f.name)}</button>`).join("")}
+          </div>
           <button class="btn btn-ember" id="pub-btn">Publish the jalsa ✦</button>
         </div>`;
       const upiIn = $("#f-upi", stage);
       upiIn.oninput = () => { $("#upi-id-wrap", stage).style.display = +upiIn.value > 0 ? "block" : "none"; };
+      $("#aud-toggle", stage).onclick = e => {
+        const b = e.target.closest("[data-m]"); if (!b) return;
+        audience.mode = b.dataset.m;
+        $$(".aud-opt", stage).forEach(el => el.classList.toggle("on", el.dataset.m === audience.mode));
+        $("#aud-people", stage).hidden = audience.mode !== "some";
+        haptic(6);
+      };
+      $("#aud-people", stage).onclick = e => {
+        const b = e.target.closest("[data-n]"); if (!b) return;
+        const n = b.dataset.n, i = audience.names.indexOf(n);
+        if (i >= 0) audience.names.splice(i, 1); else audience.names.push(n);
+        b.classList.toggle("on"); haptic(5);
+      };
       $("#pub-btn", stage).onclick = () => {
-        const title = $("#f-title", stage).value.trim() || brief.title;
+        const title = $("#f-title", stage).value.trim() || customTitle || brief.title;
         const ev = {
           id: Store.uid(), slug: Store.slugify(title),
           title: title.toUpperCase(), tagline: c.tagline, typeKey: brief.typeKey, glyph: brief.glyph,
@@ -685,6 +866,7 @@
           venue: $("#f-venue", stage).value.trim(), capacity: +$("#f-cap", stage).value || 0,
           upiAmount: +upiIn.value || 0, upiId: ($("#f-upiid", stage)?.value || "").trim(),
           hostName: S.profile.name || "You", isMine: true,
+          audience: audience.mode === "some" ? { mode: "some", names: [...audience.names] } : { mode: "all" },
           rsvps: [], updates: [], photos: [], createdAt: Date.now(),
         };
         S.events.unshift(ev);
@@ -735,7 +917,12 @@
 
   /* ---- simulated circle: friends respond to your event ------- */
   function scheduleFriendRsvps(ev) {
-    const pool = [...Store.FRIENDS].sort(() => Math.random() - .5).slice(0, 5 + Math.floor(Math.random() * 4));
+    let pool = [...Store.FRIENDS];
+    if (ev.audience && ev.audience.mode === "some") {
+      pool = pool.filter(f => ev.audience.names.includes(f.name));   // only the chosen ones see it
+    }
+    pool = pool.sort(() => Math.random() - .5);
+    if (!(ev.audience && ev.audience.mode === "some")) pool = pool.slice(0, 5 + Math.floor(Math.random() * 4));
     pool.forEach((f, i) => {
       setTimeout(() => {
         const cur = Store.ev(ev.id);
