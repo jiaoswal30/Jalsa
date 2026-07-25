@@ -1,9 +1,10 @@
 /* JALSA service worker — offline app shell */
-const CACHE = "jalsa-v3";
+const CACHE = "jalsa-v4";
 const ASSETS = [
   "./", "./index.html",
-  "./css/app.css?v=3", "./css/invites.css?v=3",
-  "./js/engine.js?v=3", "./js/templates.js?v=3", "./js/store.js?v=3", "./js/app.js?v=3",
+  "./css/app.css?v=4", "./css/invites.css?v=4",
+  "./js/engine.js?v=4", "./js/templates.js?v=4", "./js/store.js?v=4",
+  "./js/cloud.js?v=4", "./js/app.js?v=4",
   "./manifest.webmanifest", "./icon.svg", "./icon-maskable.svg",
 ];
 
@@ -25,6 +26,9 @@ self.addEventListener("activate", e => {
 self.addEventListener("fetch", e => {
   const req = e.request;
   if (req.method !== "GET") return;
+  // never cache cross-origin calls (Supabase API, fonts CDN handled separately) —
+  // live data must always hit the network.
+  if (new URL(req.url).origin !== self.location.origin) return;
   e.respondWith(
     caches.match(req).then(cached => {
       if (cached) return cached;

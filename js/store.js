@@ -206,35 +206,43 @@ const Store = (() => {
      ---------------------------------------------------------- */
   const TIER_NAMES = ["", "WHISPER", "FLEX", "UNHINGED"];
 
-  function encodeEvent(ev) {
+  // the minimal, transport-agnostic invite payload — used by both the
+  // self-contained #i= link and the Supabase cloud copy.
+  function payloadOf(ev) {
     const c = ev.concept || {};
-    const p = {
+    return {
       t: ev.title, g: ev.tagline, k: ev.typeKey, gl: ev.glyph,
       d: ev.date, tm: ev.time, v: ev.venue, c: ev.capacity || 0,
       u: ev.upiAmount || 0, ui: ev.upiId || "", h: ev.hostName || "",
       cc: { t: c.tier || 2, l: c.layout || "split", p: c.palette || "emberNight" },
     };
-    const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(p))));
+  }
+
+  function eventFromPayload(p) {
+    const cc = p.cc || {};
+    const pal = (typeof Engine !== "undefined" && Engine.PALETTES[cc.p]) || { bg: "#16100E", ink: "#FAF8F3", a: "#FF4D00", pop: "#E8B531" };
+    return {
+      id: "guest-" + uid(),
+      slug: slugify(p.t || "shared-invite"),
+      title: p.t || "A JALSA", tagline: p.g || "", typeKey: p.k || "generic", glyph: p.gl || "✦",
+      concept: { tier: cc.t || 2, tierName: TIER_NAMES[cc.t || 2], layout: cc.l || "split", palette: cc.p || "emberNight", pal, tagline: p.g || "" },
+      date: p.d || "", time: p.tm || "19:30", venue: p.v || "", capacity: p.c || 0,
+      upiAmount: p.u || 0, upiId: p.ui || "", hostName: p.h || "A friend",
+      isMine: false, shared: true, rsvps: [], updates: [], photos: [], createdAt: Date.now(),
+    };
+  }
+
+  function encodeEvent(ev) {
+    const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(payloadOf(ev)))));
     return b64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
   }
 
   function decodeEvent(str) {
     try {
       const b64 = str.replace(/-/g, "+").replace(/_/g, "/");
-      const p = JSON.parse(decodeURIComponent(escape(atob(b64))));
-      const cc = p.cc || {};
-      const pal = (typeof Engine !== "undefined" && Engine.PALETTES[cc.p]) || { bg: "#16100E", ink: "#FAF8F3", a: "#FF4D00", pop: "#E8B531" };
-      return {
-        id: "guest-" + uid(),
-        slug: slugify(p.t || "shared-invite"),
-        title: p.t || "A JALSA", tagline: p.g || "", typeKey: p.k || "generic", glyph: p.gl || "✦",
-        concept: { tier: cc.t || 2, tierName: TIER_NAMES[cc.t || 2], layout: cc.l || "split", palette: cc.p || "emberNight", pal, tagline: p.g || "" },
-        date: p.d || "", time: p.tm || "19:30", venue: p.v || "", capacity: p.c || 0,
-        upiAmount: p.u || 0, upiId: p.ui || "", hostName: p.h || "A friend",
-        isMine: false, shared: true, rsvps: [], updates: [], photos: [], createdAt: Date.now(),
-      };
+      return eventFromPayload(JSON.parse(decodeURIComponent(escape(atob(b64)))));
     } catch (e) { return null; }
   }
 
-  return { load, save, reset, get, ev, upcoming, past, isPast, discover, discoverEv, addPulse, addSharedEvent, encodeEvent, decodeEvent, FRIENDS, uid, slugify, dayOffset };
+  return { load, save, reset, get, ev, upcoming, past, isPast, discover, discoverEv, addPulse, addSharedEvent, encodeEvent, decodeEvent, payloadOf, eventFromPayload, FRIENDS, uid, slugify, dayOffset };
 })();

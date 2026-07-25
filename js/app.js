@@ -437,10 +437,26 @@
     return base + "#i=" + Store.encodeEvent(ev);
   }
 
+  function cloudURL(code) {
+    const base = location.origin && location.origin !== "null"
+      ? location.origin + location.pathname
+      : "https://jalsa.app/i";
+    return base + "#e=" + code;
+  }
+
   function shareEvent(ev) {
-    const link = inviteURL(ev);
-    const text = Engine.shareText(ev, S.profile.name, link);
     haptic(10);
+    // Prefer a live cloud link so the invite + headcount work across phones.
+    // The code is the slug (known now), so the link is ready immediately and we
+    // publish in the background. Falls back to the self-contained #i= link.
+    let link = inviteURL(ev);
+    if (Cloud.enabled && ev.slug) {
+      ev.cloudId = ev.slug;
+      if (ev.isMine) Store.save();
+      Cloud.publish(ev);
+      link = cloudURL(ev.slug);
+    }
+    const text = Engine.shareText(ev, S.profile.name, link);
     if (navigator.share) {
       navigator.share({ title: ev.title, text }).catch(() => {});
       return;
@@ -1287,6 +1303,7 @@
           const status = b.dataset.g;
           S.guestRsvps[ev.id] = status;
           Store.save();
+          if (ev.cloudId) Cloud.rsvp(ev.cloudId, S.profile.name || "A guest", status);
           if (status === "yes") { haptic(35); burst(b); }
           else haptic(10);
           setTimeout(renderConvert, 480);
@@ -1346,21 +1363,42 @@
     deferredInstall = null;
   };
 
-  // re-route if a link is opened while the app is already running
-  window.addEventListener("hashchange", () => {
+  function cloudCodeFromHash() {
+    const m = (location.hash || "").match(/[#&]e=([^&]+)/);
+    return m ? decodeURIComponent(m[1]) : null;
+  }
+
+  // Open a shared invite: cloud link (#e=) fetched live, else self-contained (#i=).
+  async function routeShared() {
+    const code = cloudCodeFromHash();
+    if (code) {
+      tabbar.classList.add("hidden");
+      setScreen(`
+        <div class="arrival">
+          <div class="arr-topbar"><span class="wordmark">JALSA<span class="dev">जलसा</span></span></div>
+          <div class="cloud-load">Opening your invite…</div>
+        </div>`);
+      const ev = await Cloud.fetchEvent(code);
+      if (ev) { renderGuestArrival(ev); return true; }
+      toast("Couldn't load that invite — it may have expired.");
+    }
     const shared = readInviteHash();
-    if (shared) renderGuestArrival(shared);
-  });
+    if (shared) { renderGuestArrival(shared); return true; }
+    return false;
+  }
+
+  // re-route if a link is opened while the app is already running
+  window.addEventListener("hashchange", () => { routeShared(); });
 
   /* ============================ boot ========================= */
   registerPWA();
-  const sharedInvite = readInviteHash();
-  if (sharedInvite) {
-    renderGuestArrival(sharedInvite);
-  } else if (!S.profile.onboarded) {
-    renderOnboard(0);
-  } else {
-    tabbar.classList.remove("hidden");
-    nav("feed");
-  }
+  (async () => {
+    if (await routeShared()) return;
+    if (!S.profile.onboarded) {
+      renderOnboard(0);
+    } else {
+      tabbar.classList.remove("hidden");
+      nav("feed");
+    }
+  })();
 })();

@@ -388,6 +388,12 @@ input,textarea,select{font-family:inherit;color:inherit}
 /* ============================================================
    ONBOARDING
    ============================================================ */
+.cloud-load{
+  flex:1;display:flex;align-items:center;justify-content:center;
+  color:var(--slate-2);font-family:var(--font-mono);font-size:13px;
+  letter-spacing:.04em;padding:40px;text-align:center;
+  animation:fadeIn .6s both;
+}
 .onboard{
   min-height:100%;display:flex;flex-direction:column;
   padding:30px 26px calc(28px + var(--safe-b));
