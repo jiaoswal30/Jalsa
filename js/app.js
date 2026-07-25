@@ -128,16 +128,24 @@
     tabbar.classList.add("hidden");
     if (step === 0) {
       setScreen(`
-        <div class="onboard">
+        <div class="onboard ob-cover">
+          <header class="mast">
+            <span class="mast-mark">JALSA<span class="dev">जलसा</span></span>
+            <span class="mast-meta">EST. BLR<br>VOL. 01</span>
+          </header>
+          <div class="rule"></div>
           <div class="ob-word">
             <span class="row"><span>Your</span></span>
             <span class="row"><span>moments</span></span>
             <span class="row"><span>live here.</span></span>
           </div>
-          <div class="ob-dev">जलसा — noun. celebration, gathering, the vibe of a good time.</div>
-          <p class="ob-sub">Your people deserve better than a WhatsApp forward. AI-designed invites. Real RSVPs. Zero chaos.</p>
+          <div class="ob-caption">
+            <span class="ob-dev">जलसा</span>
+            <span><i>noun.</i> celebration, gathering — the vibe of a good time. Your people deserve better than a WhatsApp forward.</span>
+          </div>
           <div class="ob-foot">
-            <button class="btn btn-ember" id="ob-next">Shuru karein <span style="font-size:18px">→</span></button>
+            <button class="btn btn-ember" id="ob-next">Shuru karein <span aria-hidden="true">→</span></button>
+            <div class="mast-foot">THE INVITE IS THE EVENT · NO ALGORITHM · YOUR CIRCLE ONLY</div>
           </div>
         </div>`);
       $("#ob-next").onclick = () => { haptic(); renderOnboard(1); };
@@ -145,9 +153,13 @@
     else if (step === 1) {
       setScreen(`
         <div class="onboard">
+          <header class="mast">
+            <span class="mast-idx">01 <i>—</i> WHO ARE YOU</span>
+            <span class="mast-meta">01 / 02</span>
+          </header>
+          <div class="rule"></div>
           <div class="ob-step">
-            <div class="wordmark">JALSA<span class="dev">जलसा</span></div>
-            <h2>What do your friends call you?</h2>
+            <h2 class="ob-head">What do your <em>friends</em><br>call you?</h2>
             <p class="hint">This goes on every invite you make. Choose wisely.</p>
             <input class="ob-name" id="ob-name" maxlength="18" placeholder="Priya" autocomplete="off">
           </div>
@@ -167,12 +179,16 @@
     else {
       setScreen(`
         <div class="onboard">
+          <header class="mast">
+            <span class="mast-idx">02 <i>—</i> YOUR TASTE</span>
+            <span class="mast-meta">02 / 02</span>
+          </header>
+          <div class="rule"></div>
           <div class="ob-step">
-            <div class="wordmark">JALSA<span class="dev">जलसा</span></div>
-            <h2>Pick your energy, ${esc(S.profile.name)}.</h2>
-            <p class="hint">Choose up to 3. The invite engine reads this — your designs start where your taste lives.</p>
-            <div class="vibegrid" id="vibes">
-              ${VIBES.map(v => `<button class="vibecard" data-v="${v.id}"><span class="em">${v.em}</span><span class="nm">${v.nm}</span><span class="ds">${v.ds}</span></button>`).join("")}
+            <h2 class="ob-head">Pick your <em>energy</em>,<br>${esc(S.profile.name)}.</h2>
+            <p class="hint">Up to three. The engine reads this — your designs start where your taste lives.</p>
+            <div class="vibetags" id="vibes">
+              ${VIBES.map(v => `<button class="vibetag" data-v="${v.id}"><span class="em">${v.em}</span><span class="nm">${v.nm}</span></button>`).join("")}
             </div>
           </div>
           <div class="ob-foot">
@@ -181,7 +197,7 @@
         </div>`);
       const picked = new Set();
       $("#vibes").onclick = e => {
-        const c = e.target.closest(".vibecard"); if (!c) return;
+        const c = e.target.closest(".vibetag"); if (!c) return;
         const id = c.dataset.v;
         if (picked.has(id)) { picked.delete(id); c.classList.remove("on"); }
         else if (picked.size < 3) { picked.add(id); c.classList.add("on"); haptic(6); }
