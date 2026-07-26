@@ -25,6 +25,7 @@
   --font-display:"Syne",sans-serif;
   --font-mono:"Fragment Mono","Space Mono",monospace;
   --font-serif:"Playfair Display",serif;
+  --font-editorial:"Fraunces","Playfair Display",serif;  /* high-contrast editorial */
   --safe-b:env(safe-area-inset-bottom,0px);
 }
 
@@ -434,13 +435,13 @@ input,textarea,select{font-family:inherit;color:inherit}
 
 .ob-cover .ob-word{margin-top:auto}
 .ob-word{
-  font-family:var(--font-display);font-weight:800;
-  font-size:clamp(38px,12vw,52px);line-height:.92;letter-spacing:-.035em;
+  font-family:var(--font-editorial);font-optical-sizing:auto;font-weight:600;
+  font-size:clamp(44px,13.5vw,62px);line-height:.98;letter-spacing:-.02em;
   margin-top:7vh;
 }
 .ob-word .row{display:block;overflow:hidden}
 .ob-word .row span{display:inline-block;animation:riseUp .8s var(--swift) both}
-.ob-word .row:nth-child(2) span{animation-delay:.12s;color:var(--ember);font-style:italic;font-family:var(--font-serif);font-weight:600;letter-spacing:-.01em}
+.ob-word .row:nth-child(2) span{animation-delay:.12s;color:var(--ember);font-style:italic;font-weight:500}
 .ob-word .row:nth-child(3) span{animation-delay:.24s}
 @keyframes riseUp{from{transform:translateY(110%)}to{transform:none}}
 
@@ -460,15 +461,15 @@ input,textarea,select{font-family:inherit;color:inherit}
 .ob-foot{margin-top:auto;padding-top:24px;animation:fadeIn .9s .9s both}
 
 .ob-head{
-  font-family:var(--font-display);font-weight:800;font-size:clamp(30px,8.5vw,38px);
-  letter-spacing:-.03em;line-height:1;margin:6vh 0 12px;
+  font-family:var(--font-editorial);font-optical-sizing:auto;font-weight:600;
+  font-size:clamp(32px,9vw,44px);letter-spacing:-.02em;line-height:1.02;margin:6vh 0 14px;
 }
-.ob-head em{font-family:var(--font-serif);font-style:italic;font-weight:600;color:var(--ember);letter-spacing:-.01em}
-.ob-step .hint{color:var(--slate-2);font-size:14px;margin-bottom:30px;line-height:1.55;max-width:300px}
+.ob-head em{font-style:italic;font-weight:500;color:var(--ember)}
+.ob-step .hint{color:var(--slate-2);font-size:14px;margin-bottom:30px;line-height:1.6;max-width:300px}
 .ob-name{
   width:100%;background:transparent;border:none;outline:none;
   border-bottom:2px solid rgba(250,248,243,.2);
-  font-family:var(--font-display);font-weight:700;font-size:38px;
+  font-family:var(--font-editorial);font-weight:500;font-size:40px;
   padding:6px 2px 12px;color:var(--pearl);
   transition:border-color .3s;caret-color:var(--ember);
 }

@@ -1,10 +1,10 @@
 /* JALSA service worker — offline app shell */
-const CACHE = "jalsa-v7";
+const CACHE = "jalsa-v8";
 const ASSETS = [
   "./", "./index.html",
-  "./css/app.css?v=7", "./css/invites.css?v=7",
-  "./js/engine.js?v=7", "./js/templates.js?v=7", "./js/store.js?v=7",
-  "./js/cloud.js?v=7", "./js/app.js?v=7",
+  "./css/app.css?v=8", "./css/invites.css?v=8",
+  "./js/engine.js?v=8", "./js/templates.js?v=8", "./js/store.js?v=8",
+  "./js/cloud.js?v=8", "./js/app.js?v=8",
   "./manifest.webmanifest", "./icon.svg", "./icon-maskable.svg",
 ];
 
@@ -22,21 +22,18 @@ self.addEventListener("activate", e => {
   );
 });
 
-// cache-first for our shell, network-fallback that also warms the cache (fonts, etc.)
+// network-first for our own files: always fetch the latest when online, fall
+// back to cache only when offline. This prevents stale UI after a deploy.
+// Cross-origin calls (Supabase API, fonts) go straight to the network.
 self.addEventListener("fetch", e => {
   const req = e.request;
   if (req.method !== "GET") return;
-  // never cache cross-origin calls (Supabase API, fonts CDN handled separately) —
-  // live data must always hit the network.
   if (new URL(req.url).origin !== self.location.origin) return;
   e.respondWith(
-    caches.match(req).then(cached => {
-      if (cached) return cached;
-      return fetch(req).then(res => {
-        const copy = res.clone();
-        caches.open(CACHE).then(c => c.put(req, copy)).catch(() => {});
-        return res;
-      }).catch(() => cached);
-    })
+    fetch(req).then(res => {
+      const copy = res.clone();
+      caches.open(CACHE).then(c => c.put(req, copy)).catch(() => {});
+      return res;
+    }).catch(() => caches.match(req))
   );
 });
