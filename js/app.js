@@ -223,7 +223,7 @@
     setScreen(`
       <div class="apphead">
         <div>
-          <h1>The Scene</h1>
+          <h1>The <em>Scene</em></h1>
           <div class="sub">Bengaluru · your circle only</div>
         </div>
         <div class="head-right">

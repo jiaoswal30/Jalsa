@@ -1,10 +1,10 @@
 /* JALSA service worker — offline app shell */
-const CACHE = "jalsa-v8";
+const CACHE = "jalsa-v9";
 const ASSETS = [
   "./", "./index.html",
-  "./css/app.css?v=8", "./css/invites.css?v=8",
-  "./js/engine.js?v=8", "./js/templates.js?v=8", "./js/store.js?v=8",
-  "./js/cloud.js?v=8", "./js/app.js?v=8",
+  "./css/app.css?v=9", "./css/invites.css?v=9",
+  "./js/engine.js?v=9", "./js/templates.js?v=9", "./js/store.js?v=9",
+  "./js/cloud.js?v=9", "./js/app.js?v=9",
   "./manifest.webmanifest", "./icon.svg", "./icon-maskable.svg",
 ];
 
