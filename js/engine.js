@@ -23,7 +23,42 @@ const Engine = (() => {
     desiY2K:           { tier: 3, name: "Desi Y2K",           bg: "#1A0030", ink: "#F2EAFF", a: "#FF2D78", pop: "#FFD700", extra: "#00F5FF" },
     fluorOrange:       { tier: 3, name: "Fluorescent",        bg: "#0A0605", ink: "#FAF8F3", a: "#FF4D00", pop: "#B5FF3A" },
     midnightAcid:      { tier: 3, name: "Midnight Acid",      bg: "#0D0B1E", ink: "#FAF8F3", a: "#E8F44A", pop: "#FF2D78" },
+
+    // ---- tier 1 · warm editorial grounds (cream / bone / paper) ----
+    creamCrimson:      { tier: 1, name: "Cream Crimson",      bg: "#F3ECE1", ink: "#2A1410", a: "#C0271F" },
+    ivoryGold:         { tier: 1, name: "Ivory Gold",         bg: "#F4EEDF", ink: "#2A2114", a: "#B0862E" },
+    boneInk:           { tier: 1, name: "Bone & Ink",         bg: "#EDE7DA", ink: "#14110E", a: "#B5432C" },
+    blushWine:         { tier: 1, name: "Blush Wine",         bg: "#F3E7E4", ink: "#2A1418", a: "#8E2E44" },
+    oatCobalt:         { tier: 1, name: "Oat Cobalt",         bg: "#EFE9DC", ink: "#14171F", a: "#2E5AA8" },
+    sageLinen:         { tier: 1, name: "Sage Linen",         bg: "#EBEDE3", ink: "#1B1E1A", a: "#6F8A5E" },
+    terracottaPaper:   { tier: 1, name: "Terracotta Paper",   bg: "#F1E7DC", ink: "#241611", a: "#C56B41" },
+
+    // ---- tier 2 · dark grounds, one loud accent + acid pop ----
+    carbonLime:        { tier: 2, name: "Carbon Lime",        bg: "#121212", ink: "#F2F2EC", a: "#FF5A1F", pop: "#C6FF3A" },
+    plumAcid:          { tier: 2, name: "Plum Acid",          bg: "#1A1226", ink: "#F0E9F5", a: "#C64BE0", pop: "#E8F44A" },
+    navyCoral:         { tier: 2, name: "Navy Coral",         bg: "#0C1826", ink: "#EFE7DA", a: "#FF6B5C", pop: "#F4D03F" },
+    oxblood:           { tier: 2, name: "Oxblood",            bg: "#1C0F10", ink: "#F3E9DD", a: "#E23B2E", pop: "#EAC66A" },
+    tealTangerine:     { tier: 2, name: "Teal Tangerine",     bg: "#0C1B1B", ink: "#F0ECE0", a: "#FF7A2E", pop: "#34E0D0" },
+    slateSulphur:      { tier: 2, name: "Slate Sulphur",      bg: "#171A1F", ink: "#F1EEE6", a: "#F2C21C", pop: "#FF5A6E" },
+
+    // ---- tier 3 · max saturation neon ----
+    cyberBubblegum:    { tier: 3, name: "Cyber Bubblegum",    bg: "#12001F", ink: "#F5EAFF", a: "#FF3DA5", pop: "#3DF5FF", extra: "#FFE23D" },
+    voltGrape:         { tier: 3, name: "Volt Grape",         bg: "#14002E", ink: "#F0EAFF", a: "#B5FF3A", pop: "#FF2D78", extra: "#00F5FF" },
+    infraRed:          { tier: 3, name: "Infrared",           bg: "#0A0000", ink: "#FFF0F0", a: "#FF2D2D", pop: "#FFD400", extra: "#00F5FF" },
+    toxicSpearmint:    { tier: 3, name: "Toxic Spearmint",    bg: "#001410", ink: "#EAFFF7", a: "#00FFA3", pop: "#FF3DA5", extra: "#FFE23D" },
+    hazardTape:        { tier: 3, name: "Hazard Tape",        bg: "#0A0A0A", ink: "#FAFAF0", a: "#FFD400", pop: "#FF2D2D", extra: "#00F5FF" },
   };
+
+  // palette keys grouped by tier + display-font & layout pools — the
+  // generator draws from these so no two invites look the same.
+  const TIER_PALS = { 1: [], 2: [], 3: [] };
+  for (const [k, v] of Object.entries(PALETTES)) TIER_PALS[v.tier].push(k);
+  const FONT_POOLS = {
+    1: ["Shrikhand", "Bricolage Grotesque", "Big Shoulders Display"],
+    2: ["Anton", "Archivo", "Syne", "Unbounded"],
+    3: ["Bebas Neue", "Anton", "Big Shoulders Display", "Unbounded"],
+  };
+  const LAYOUTS = { 1: ["editorial", "poster"], 2: ["split", "marquee"], 3: ["chaos", "y2k", "wall"] };
 
   /* ---------- event type intelligence ------------------------- */
   const TYPES = {
@@ -246,19 +281,30 @@ const Engine = (() => {
 
     const title = makeTitle(typeKey, name, seed);
 
-    // three concepts: the matched tier + two contrasting reads
+    // three concepts: the matched tier + two contrasting reads.
+    // Each pulls a palette from the WHOLE tier set (not the type's small
+    // pool) plus a display font and layout — so colour, type and structure
+    // all shift every generation and every reroll.
     const tierOrder = { 1: [1, 2, 3], 2: [2, 3, 1], 3: [3, 2, 1] }[tier];
     const concepts = tierOrder.map((t, i) => {
-      const palKey = pick(def.palettes[t - 1], seed + i);
+      const pals = TIER_PALS[t];
+      // bias the first concept toward the type's curated palette, let the
+      // others roam the full set for variety
+      const palKey = (i === 0 && def.palettes[t - 1])
+        ? pick(def.palettes[t - 1], seed)
+        : pals[(seed + i * 13 + t * 5) % pals.length];
       const pal = PALETTES[palKey];
-      const layouts = { 1: ["editorial", "poster"], 2: ["split", "marquee"], 3: ["chaos", "y2k", "wall"] }[t];
-      const layout = pick(layouts, seed + i * 7);
+      const layouts = LAYOUTS[t];
+      const layout = layouts[(seed + i * 7) % layouts.length];
+      const fonts = FONT_POOLS[t];
+      const titleFont = fonts[(seed + i * 11 + t * 3) % fonts.length];
       return {
         tier: t,
         tierName: ["", "WHISPER", "FLEX", "UNHINGED"][t],
         layout,
         palette: palKey,
         pal,
+        titleFont,
         tagline: pick(def.tags[t], seed + i * 3),
       };
     });

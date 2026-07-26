@@ -74,6 +74,7 @@ const Templates = (() => {
     el.style.setProperty("--a", pal.a);
     if (pal.pop) el.style.setProperty("--pop", pal.pop);
     if (pal.extra) el.style.setProperty("--extra", pal.extra);
+    if (c.titleFont) el.style.setProperty("--title-font", '"' + c.titleFont + '"');
 
     const dateStr = fmtDate(ev);
     const timeStr = Engine.formatTime(ev.time);
@@ -205,9 +206,10 @@ const Templates = (() => {
   }
 
   function heroTitleStyle(concept) {
-    if (concept.tier === 1) return `font-family:'Shrikhand',serif;font-weight:400;letter-spacing:0;line-height:1.05`;
-    if (concept.tier === 2) return `font-family:'Anton',sans-serif;font-weight:400;letter-spacing:.01em;text-transform:uppercase`;
-    return `font-family:'Bebas Neue',sans-serif;font-weight:400;font-size:42px;color:${concept.pal.a};text-shadow:2px 2px 0 ${concept.pal.pop || "#000"}`;
+    const f = concept.titleFont;
+    if (concept.tier === 1) return `font-family:${f ? `'${f}',` : ""}'Shrikhand',serif;font-weight:400;letter-spacing:0;line-height:1.05`;
+    if (concept.tier === 2) return `font-family:${f ? `'${f}',` : ""}'Anton',sans-serif;font-weight:800;letter-spacing:.01em;text-transform:uppercase`;
+    return `font-family:${f ? `'${f}',` : ""}'Bebas Neue',sans-serif;font-weight:400;font-size:42px;color:${concept.pal.a};text-shadow:2px 2px 0 ${concept.pal.pop || "#000"}`;
   }
 
   function hexA(hex, a) {

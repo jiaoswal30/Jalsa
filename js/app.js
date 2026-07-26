@@ -533,6 +533,7 @@
     let customTitle = null;                 // manual title override
     let origSnapshot = null;                // pristine design, for "reset"
     let audience = { mode: "all", names: [] };
+    let inspoPalette = null;                // [bg,ink,a,pop] pulled from an uploaded inspo pic
 
     const ov = openOverlay(`
       <div class="ov-top">${backBtn}<span class="ov-title">New Jalsa</span><span style="width:40px"></span></div>
@@ -557,11 +558,30 @@
             ${Object.entries(Engine.TYPES).filter(([k]) => k !== "generic").slice(0, 12).map(([k, d]) =>
               `<button class="chip" data-t="${k}">${d.glyph} ${d.label}</button>`).join("")}
           </div>
-          <div class="spacer"></div><div class="spacer"></div>
+          <div class="section-label">have a look in mind?</div>
+          <label class="inspo-drop" id="cr-inspo">
+            <input type="file" id="cr-inspo-file" accept="image/*" hidden>
+            <span id="cr-inspo-label">＋ Add an inspo pic — the designs borrow its palette</span>
+          </label>
+          <div class="spacer"></div>
           <button class="btn btn-ember" id="gen-btn" disabled>Design my invite ✦</button>
           <p class="mic-note">FREE TEXT IN · DESIGNED INVITE OUT · 12 SECONDS</p>
         </div>`;
       const ta = $("#desc", stage), gen = $("#gen-btn", stage), vr = $("#vibe-read", stage);
+      const inspoFile = $("#cr-inspo-file", stage);
+      if (inspoFile) inspoFile.onchange = () => {
+        const f = inspoFile.files && inspoFile.files[0]; if (!f) return;
+        $("#cr-inspo-label", stage).textContent = "Reading your inspo…";
+        extractPalette(f).then(cols => {
+          inspoPalette = mapInspo(cols);
+          $("#cr-inspo-label", stage).innerHTML =
+            `✓ Locked to your inspo` +
+            `<span style="display:inline-flex;gap:5px;margin-left:10px;vertical-align:middle">` +
+            inspoPalette.map(h => `<i style="width:15px;height:15px;border-radius:4px;background:${h};display:inline-block"></i>`).join("") +
+            `</span>`;
+          haptic(12);
+        }).catch(() => { $("#cr-inspo-label", stage).textContent = "Couldn't read that image — try another"; });
+      };
       if (lastText) { ta.value = lastText; updateRead(); }
       ta.focus();
       ta.oninput = updateRead;
@@ -585,6 +605,12 @@
     function stepGenerate(text) {
       const taste = tasteTier();
       brief = Engine.generate(text, { tasteTier: taste, reroll });
+      // if the user gave an inspo pic, recolour every concept to its palette
+      if (inspoPalette) {
+        brief.concepts.forEach(c => {
+          c.pal = Object.assign({}, c.pal, { bg: inspoPalette[0], ink: inspoPalette[1], a: inspoPalette[2], pop: inspoPalette[3] });
+        });
+      }
       stage.innerHTML = `
         <div class="gen-theatre">
           <div class="gen-orb"></div>
