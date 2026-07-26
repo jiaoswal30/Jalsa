@@ -82,6 +82,25 @@ const Templates = (() => {
     const glyph = ev.glyph || "✦";
     const [l1, l2] = splitTitle(ev.title);
 
+    /* ---------------- PHOTO · script + Polaroid ------------- */
+    if (c.layout === "photo") {
+      const patternWord = (ev.tagline && ev.tagline.length < 22 ? ev.tagline : ev.title).toLowerCase();
+      const photoInner = ev.photo
+        ? `<img src="${ev.photo}" alt="">`
+        : `<div class="ps-noimg">＋ add your photo</div>`;
+      el.innerHTML = `
+        <div class="ps-pattern" aria-hidden="true">${(esc(patternWord) + " · ").repeat(90)}</div>
+        <div class="ps-kicker rv rv-1">You're invited</div>
+        <div class="ps-script ps-1 rv rv-2">${esc(l1 || ev.title)}</div>
+        <div class="ps-photo rv rv-3">${photoInner}</div>
+        ${l2 ? `<div class="ps-script ps-2 rv rv-3">${esc(l2)}</div>` : ""}
+        <div class="ps-foot rv rv-4">
+          <div class="ps-host">${esc(ev.hostName || "")}</div>
+          <div class="ps-det"><b>${esc(fmtDateShort(ev))}</b>&nbsp;·&nbsp;${esc(timeStr)}<br>${esc(venue.toUpperCase())}</div>
+        </div>`;
+      return el;
+    }
+
     /* ---------------- TIER 1 · WHISPER ---------------------- */
     if (c.tier === 1) {
       if (c.layout === "poster") {

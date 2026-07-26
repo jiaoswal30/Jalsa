@@ -37,6 +37,60 @@
 @keyframes spinSlow{to{transform:rotate(360deg)}}
 
 /* ============================================================
+   PHOTO — script wordmark wrapping a Polaroid (magazine invite)
+   ============================================================ */
+.invite.l-photo{padding:7% 7%;justify-content:flex-start;align-items:stretch}
+.l-photo .ps-pattern{
+  position:absolute;inset:-8%;z-index:0;pointer-events:none;
+  font-family:"DM Sans",sans-serif;font-weight:400;
+  font-size:4.4cqw;line-height:2.5;letter-spacing:.06em;word-spacing:.3cqw;
+  color:color-mix(in srgb,var(--ink) 13%,transparent);
+  transform:rotate(-9deg);overflow:hidden;text-transform:lowercase;
+}
+.l-photo .ps-kicker{
+  position:relative;z-index:4;text-align:center;margin-top:1.5cqh;
+  font-family:"DM Sans",sans-serif;font-weight:500;
+  font-size:3cqw;letter-spacing:.02em;color:var(--ink);
+}
+.l-photo .ps-script{
+  position:relative;z-index:3;text-align:center;
+  font-family:"Corinthia",cursive;font-weight:700;
+  font-size:31cqw;line-height:.7;color:var(--a);
+  white-space:nowrap;padding:0 2%;
+}
+.l-photo .ps-1{margin-top:.5cqh}
+.l-photo .ps-2{margin-top:-3cqh}
+.l-photo .ps-photo{
+  position:relative;z-index:2;align-self:center;
+  width:47cqw;margin:-7cqh auto -5cqh;
+  background:#fff;padding:2cqw 2cqw 7cqw;
+  box-shadow:0 2cqw 5cqw rgba(0,0,0,.3);
+  transform:rotate(-2.5deg);
+}
+.l-photo .ps-photo img,.l-photo .ps-noimg{
+  display:block;width:100%;aspect-ratio:1/1.08;object-fit:cover;
+}
+.l-photo .ps-photo img{filter:contrast(1.04) saturate(.96)}
+.l-photo .ps-noimg{
+  display:flex;align-items:center;justify-content:center;
+  background:#e7e0d3;color:#a09788;font-family:"DM Sans",sans-serif;
+  font-weight:500;font-size:3.2cqw;letter-spacing:.03em;
+}
+.l-photo .ps-foot{
+  position:absolute;left:7%;right:7%;bottom:6cqh;z-index:4;
+  display:flex;justify-content:space-between;align-items:flex-end;gap:3cqw;
+}
+.l-photo .ps-host{
+  font-family:"Anton",sans-serif;text-transform:uppercase;
+  font-size:6cqw;line-height:.9;color:var(--ink);max-width:44%;word-break:break-word;
+}
+.l-photo .ps-det{
+  text-align:right;font-family:"DM Sans",sans-serif;font-weight:500;
+  font-size:2.7cqw;line-height:1.7;color:var(--ink);
+}
+.l-photo .ps-det b{font-weight:700}
+
+/* ============================================================
    TIER 1 — WHISPER · editorial print, quiet but striking
    ============================================================ */
 .invite.t1{padding:9% 8%}

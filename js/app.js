@@ -534,6 +534,25 @@
     let origSnapshot = null;                // pristine design, for "reset"
     let audience = { mode: "all", names: [] };
     let inspoPalette = null;                // [bg,ink,a,pop] pulled from an uploaded inspo pic
+    let customPhoto = null;                 // compressed data URL for photo-poster templates
+
+    // shrink an uploaded image to a data URL small enough for localStorage
+    function compressPhoto(file, max = 820) {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+          const scale = Math.min(1, max / Math.max(img.width, img.height));
+          const cv = document.createElement("canvas");
+          cv.width = Math.round(img.width * scale);
+          cv.height = Math.round(img.height * scale);
+          cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
+          URL.revokeObjectURL(img.src);
+          resolve(cv.toDataURL("image/jpeg", 0.82));
+        };
+        img.onerror = reject;
+        img.src = URL.createObjectURL(file);
+      });
+    }
 
     const ov = openOverlay(`
       <div class="ov-top">${backBtn}<span class="ov-title">New Jalsa</span><span style="width:40px"></span></div>
@@ -714,7 +733,7 @@
       const c = brief.concepts[picked];        // edited in place
       const d = draftEvent(text);
       if (customTitle == null) customTitle = brief.title;
-      if (!origSnapshot) origSnapshot = JSON.parse(JSON.stringify({ pal: c.pal, tagline: c.tagline, title: brief.title }));
+      if (!origSnapshot) origSnapshot = JSON.parse(JSON.stringify({ pal: c.pal, tagline: c.tagline, title: brief.title, layout: c.layout }));
 
       stage.innerHTML = `
         <div class="create-body" style="padding-bottom:4px">
@@ -733,6 +752,12 @@
               ${colourInput("a", "Accent", c.pal.a)}
               ${colourInput("pop", "Highlight", c.pal.pop || c.pal.a)}
             </div>
+            <div class="section-label">Your photo</div>
+            <label class="inspo-drop">
+              <input type="file" id="ed-photo-file" accept="image/*" hidden>
+              <span id="ed-photo-label">${customPhoto ? "✓ Photo added — tap to change" : "＋ Add a photo to feature in the invite"}</span>
+            </label>
+            <button class="btn ${c.layout === "photo" ? "btn-ember" : "btn-ghost"}" id="photo-style" style="margin-top:10px">${c.layout === "photo" ? "✓ Photo-poster style — tap to remove" : "Switch to photo-poster layout"}</button>
             <div class="section-label">Inspiration</div>
             <label class="inspo-drop">
               <input type="file" id="inspo-file" accept="image/*" hidden>
@@ -750,12 +775,37 @@
       const frame = $("#ed-frame", stage);
       function repaint() {
         frame.innerHTML = "";
-        const preview = Object.assign({}, d, { title: (customTitle || "").toUpperCase() || "YOUR JALSA" });
+        const isPhoto = c.layout === "photo";
+        const preview = Object.assign({}, d, {
+          title: isPhoto ? (customTitle || "Your Jalsa") : ((customTitle || "").toUpperCase() || "YOUR JALSA"),
+          photo: customPhoto,
+        });
         const inv = Templates.render(preview, c);
         frame.appendChild(inv);
         requestAnimationFrame(() => { inv.style.transform = `scale(${frame.clientWidth / 340})`; });
       }
       repaint();
+
+      function isDark(hex) { const [r, g, b] = hexRgb(hex); return (.2126 * r + .7152 * g + .0722 * b) < 130; }
+      function setPhotoLayout() {
+        c.layout = "photo";
+        if (isDark(c.pal.bg)) c.pal = Object.assign({}, c.pal, { bg: "#F3ECE1", ink: "#2A1410", a: "#C0271F" });
+      }
+      const photoFile = $("#ed-photo-file", stage);
+      photoFile.onchange = () => {
+        const f = photoFile.files && photoFile.files[0]; if (!f) return;
+        $("#ed-photo-label", stage).textContent = "Adding photo…";
+        compressPhoto(f).then(url => {
+          customPhoto = url;
+          if (c.layout !== "photo") setPhotoLayout();
+          haptic(12); stepCustomize(text);
+        }).catch(() => { $("#ed-photo-label", stage).textContent = "Couldn't load that image — try another"; });
+      };
+      $("#photo-style", stage).onclick = () => {
+        if (c.layout === "photo") c.layout = origSnapshot.layout;
+        else setPhotoLayout();
+        haptic(10); stepCustomize(text);
+      };
 
       $("#ed-title", stage).oninput = e => { customTitle = e.target.value; repaint(); };
       $("#ed-tag", stage).oninput = e => { c.tagline = e.target.value; repaint(); };
@@ -908,6 +958,7 @@
           venue: $("#f-venue", stage).value.trim(), capacity: +$("#f-cap", stage).value || 0,
           upiAmount: +upiIn.value || 0, upiId: ($("#f-upiid", stage)?.value || "").trim(),
           hostName: S.profile.name || "You", isMine: true,
+          photo: customPhoto || null,
           audience: audience.mode === "some" ? { mode: "some", names: [...audience.names] } : { mode: "all" },
           rsvps: [], updates: [], photos: [], createdAt: Date.now(),
         };
