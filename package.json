@@ -1,0 +1,10 @@
+{
+  "name": "jalsa",
+  "version": "1.0.0",
+  "description": "JALSA — the invite IS the event. Static, on-device prototype (vanilla HTML/CSS/JS).",
+  "private": true,
+  "scripts": {
+    "dev": "npx --yes http-server . -p 8765 -c-1 -o",
+    "start": "npx --yes http-server . -p 8765 -c-1"
+  }
+}
