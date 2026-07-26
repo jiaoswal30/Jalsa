@@ -53,9 +53,9 @@
   color:var(--a);margin-bottom:4.5cqh;
 }
 .t1 .w-title{
-  font-family:"Playfair Display",serif;font-style:italic;font-weight:600;
-  font-size:13.5cqw;line-height:1;letter-spacing:0;
-  max-width:96%;position:relative;z-index:2;
+  font-family:"Shrikhand",serif;font-weight:400;
+  font-size:10.5cqw;line-height:1.04;letter-spacing:0;
+  max-width:98%;position:relative;z-index:2;
 }
 .t1 .w-rule{
   width:38%;height:1px;background:var(--ink);opacity:.55;margin:5cqh 0 3.2cqh;
@@ -81,8 +81,8 @@
 .t1.l-poster{justify-content:flex-start}
 .t1.l-poster .w-poster{
   position:relative;z-index:2;margin-top:8cqh;
-  font-family:"Playfair Display",serif;font-style:italic;font-weight:600;
-  font-size:16cqw;line-height:.98;letter-spacing:-.01em;
+  font-family:"Shrikhand",serif;font-weight:400;
+  font-size:12.5cqw;line-height:1.05;letter-spacing:0;
   display:flex;flex-direction:column;
 }
 .t1.l-poster .w-poster span:nth-child(2){color:var(--a);margin-left:9cqw}
@@ -129,20 +129,20 @@
 .t2 .f-titlewrap{position:relative;z-index:2;margin-top:5cqh;transform:rotate(-3deg)}
 .t2 .f-echo{
   position:absolute;left:1.4cqw;top:1.2cqh;z-index:-1;width:110%;
-  font-family:"Syne",sans-serif;font-weight:800;
-  font-size:16.5cqw;line-height:.9;letter-spacing:-.03em;
+  font-family:"Anton",sans-serif;font-weight:400;text-transform:uppercase;
+  font-size:16.5cqw;line-height:.86;letter-spacing:.01em;
   color:transparent;-webkit-text-stroke:1.5px color-mix(in srgb,var(--pop) 55%,transparent);
   word-break:break-word;
 }
 .t2 .f-line1{
-  font-family:"Syne",sans-serif;font-weight:800;
-  font-size:16.5cqw;line-height:.9;letter-spacing:-.03em;
+  font-family:"Anton",sans-serif;font-weight:400;text-transform:uppercase;
+  font-size:16.5cqw;line-height:.86;letter-spacing:.01em;
   text-shadow:0.3cqw 0.3cqw 0 var(--pop);
   word-break:break-word;
 }
 .t2 .f-line2{
-  font-family:"Syne",sans-serif;font-weight:400;
-  font-size:16.5cqw;line-height:.96;letter-spacing:-.02em;opacity:.94;
+  font-family:"Anton",sans-serif;font-weight:400;text-transform:uppercase;
+  font-size:16.5cqw;line-height:.9;letter-spacing:.01em;opacity:.7;
   word-break:break-word;
 }
 .t2 .f-line1 .popword{color:var(--pop);text-shadow:0.3cqw 0.3cqw 0 var(--a)}
