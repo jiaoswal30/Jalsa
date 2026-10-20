@@ -1,1684 +1,1167 @@
 /* ============================================================
-   JALSA — app
+   jalsa — app
    ============================================================ */
 
 (() => {
-  const $ = (sel, root = document) => root.querySelector(sel);
-  const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
-  const esc = Templates.esc;
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+  const esc = Editions.esc;
   const screen = $("#screen");
   const tabbar = $("#tabbar");
-  const overlayRoot = $("#overlay-root");
+  const overlays = $("#overlay-root");
 
   let S = Store.load();
-  let currentNav = "feed";
+  let current = "upcoming";
 
   /* ============================ utils ======================== */
-  function haptic(p = 12) { if (navigator.vibrate) try { navigator.vibrate(p); } catch (e) {} }
+  function haptic(p = 10) { try { navigator.vibrate && navigator.vibrate(p); } catch (e) {} }
 
   function toast(msg, ms = 2600) {
     const t = document.createElement("div");
     t.className = "toast";
-    t.innerHTML = `<span class="dot"></span><span>${msg}</span>`;
+    t.textContent = msg;
     $("#toast-root").appendChild(t);
     setTimeout(() => { t.classList.add("out"); setTimeout(() => t.remove(), 320); }, ms);
-  }
-
-  function burst(host, n = 14) {
-    const b = document.createElement("div");
-    b.className = "burst";
-    for (let i = 0; i < n; i++) {
-      const p = document.createElement("i");
-      const ang = (Math.PI * 2 * i) / n + Math.random() * 0.5;
-      const dist = 34 + Math.random() * 46;
-      p.style.setProperty("--dx", Math.cos(ang) * dist + "px");
-      p.style.setProperty("--dy", Math.sin(ang) * dist + "px");
-      b.appendChild(p);
-    }
-    host.appendChild(b);
-    setTimeout(() => b.remove(), 750);
   }
 
   function timeAgo(ts) {
     const s = (Date.now() - ts) / 1000;
     if (s < 90) return "just now";
-    if (s < 3600) return Math.round(s / 60) + "m ago";
-    if (s < 86400) return Math.round(s / 3600) + "h ago";
-    return Math.round(s / 86400) + "d ago";
+    if (s < 3600) return Math.round(s / 60) + " min ago";
+    if (s < 86400) return Math.round(s / 3600) + " hr ago";
+    const d = Math.round(s / 86400);
+    return d === 1 ? "yesterday" : d + " days ago";
   }
 
-  function countdown(ev) {
-    const target = new Date(ev.date + "T" + (ev.time || "19:00"));
-    const diff = target - new Date();
-    if (diff < 0 && diff > -4 * 36e5) return "LIVE";
-    if (diff < 0) return null;
-    const d = Math.floor(diff / 864e5), h = Math.floor((diff % 864e5) / 36e5), m = Math.floor((diff % 36e5) / 6e4);
-    if (d > 0) return `${d}D ${h}H`;
-    if (h > 0) return `${h}H ${m}M`;
-    return `${m}M ⚡`;
+  function until(ev) {
+    const diff = new Date(ev.date + "T" + (ev.time || "19:00")) - new Date();
+    if (diff < 0 && diff > -4 * 36e5) return "Happening now";
+    if (diff < 0) return "";
+    const h = diff / 36e5;
+    if (h < 1) return "In " + Math.max(1, Math.round(diff / 6e4)) + " min";
+    if (h < 20) return "In " + Math.round(h) + " hr";
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const days = Math.round((new Date(ev.date + "T00:00") - today) / 864e5);
+    return days <= 1 ? "Tomorrow" : "In " + days + " days";
   }
 
-  function whenLine(ev) {
-    const d = new Date(ev.date + "T00:00");
-    return d.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" }) + " · " + Engine.formatTime(ev.time);
+  function shortDate(ev) {
+    if (!ev.date) return "Date to follow";
+    return new Date(ev.date + "T00:00").toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" });
   }
+  const when = ev => `${shortDate(ev)} · ${Engine.formatTime(ev.time)}`;
 
-  function goingCount(ev) { return ev.rsvps.filter(r => r.status === "yes").length + (S.myRsvps[ev.id] === "yes" ? 1 : 0); }
+  const STATUS = {
+    yes:   { opt: "Accepts with pleasure", stamp: "Accepted",     cls: "" },
+    maybe: { opt: "Will confirm shortly",  stamp: "Pencilled in", cls: "grey" },
+    no:    { opt: "Declines with regret",  stamp: "Regrets",      cls: "red" },
+  };
 
-  function avatarHTML(r, i) {
-    return `<div class="av" style="background:hsl(${r.hue} 62% 46%);animation-delay:${i * 60}ms">${esc(r.name[0])}</div>`;
+  /* everyone who has replied to an event, wherever the reply came from */
+  function replies(ev) {
+    const list = (ev.rsvps || []).slice();
+    (ev.cloudRsvps || []).forEach(r => list.push({ name: r.name, hue: (Engine.hashStr(r.name) % 360), status: r.status, src: "link", at: r.created_at }));
+    return list;
+  }
+  function counts(ev) {
+    const all = replies(ev);
+    const mine = !ev.isMine && S.myReplies[ev.id];
+    const c = { yes: 0, maybe: 0, no: 0 };
+    all.forEach(r => { if (c[r.status] != null) c[r.status]++; });
+    if (mine && c[mine] != null) c[mine]++;
+    return c;
+  }
+  function faces(list, n = 4) {
+    const yes = list.filter(r => r.status === "yes");
+    return `<span class="faces">${yes.slice(0, n).map(r =>
+      `<span class="face" style="background:hsl(${r.hue} 32% 40%)">${esc(r.name[0])}</span>`).join("")}${yes.length > n ? `<span class="more">+${yes.length - n}</span>` : ""}</span>`;
+  }
+  function stampHTML(status, extra = "") {
+    const s = STATUS[status];
+    return s ? `<span class="stamp ${s.cls} ${extra}">${s.stamp}</span>` : "";
+  }
+  function houseStyle() {
+    const p = S.profile.picks || {};
+    return Object.keys(p).sort((a, b) => p[b] - p[a])[0] || null;
   }
 
   /* ============================ nav ========================== */
-  function nav(to) {
-    if (to === "create") { openCreate(); return; }
-    currentNav = to;
-    $$(".tab", tabbar).forEach(t => t.classList.toggle("active", t.dataset.nav === to));
-    const renderers = { feed: renderFeed, discover: renderDiscover, memories: renderMemories, pulse: renderPulse, profile: renderProfile };
-    (renderers[to] || renderFeed)();
-  }
+  const RENDER = { upcoming: renderUpcoming, town: renderTown, kept: renderKept, you: renderYou };
 
+  function nav(to) {
+    if (to === "new") { openCreate(); return; }
+    current = to;
+    $$(".tab", tabbar).forEach(t => t.classList.toggle("active", t.dataset.nav === to));
+    (RENDER[to] || renderUpcoming)();
+  }
   tabbar.addEventListener("click", e => {
-    const btn = e.target.closest("[data-nav]");
-    if (!btn) return;
-    haptic(8);
-    nav(btn.dataset.nav);
+    const b = e.target.closest("[data-nav]");
+    if (b) { haptic(6); nav(b.dataset.nav); }
   });
 
-  function setScreen(html) {
+  function setScreen(html, { bare = false } = {}) {
     screen.onclick = null;
     screen.innerHTML = html;
     screen.scrollTop = 0;
+    screen.classList.toggle("bare", bare);
     screen.classList.remove("screen-enter");
     void screen.offsetWidth;
     screen.classList.add("screen-enter");
   }
+  function refresh() { if (!overlays.children.length && !screen.querySelector(".arrival, .cover")) nav(current); }
 
-  /* ============================ overlays ===================== */
-  function openOverlay(html) {
-    const ov = document.createElement("div");
-    ov.className = "overlay";
-    ov.innerHTML = html;
-    overlayRoot.appendChild(ov);
-    return ov;
+  /* ============================ sheets ======================= */
+  function openSheet(label, body, { table = false, tools = "" } = {}) {
+    const el = document.createElement("div");
+    el.className = "sheet" + (table ? " table" : "");
+    el.innerHTML = `
+      <div class="sheet-top">
+        <button class="close" data-close aria-label="Close">×</button>
+        <span class="lab">${label}</span>
+        <span style="min-width:40px;display:flex;justify-content:flex-end">${tools}</span>
+      </div>
+      <div class="sheet-body">${body}</div>`;
+    overlays.appendChild(el);
+    el.addEventListener("click", e => { if (e.target.closest("[data-close]")) closeSheet(el); });
+    return el;
   }
-  function closeOverlay(ov) {
-    ov.classList.add("closing");
-    setTimeout(() => ov.remove(), 300);
+  function closeSheet(el, after) {
+    if (!el || el.classList.contains("closing")) return;
+    el.classList.add("closing");
+    setTimeout(() => { el.remove(); clearInterval(el._poll); after ? after() : refresh(); }, 280);
   }
-  window.addEventListener("keydown", e => {
-    if (e.key === "Escape") { const ov = overlayRoot.lastElementChild; if (ov) closeOverlay(ov); }
-  });
+  addEventListener("keydown", e => { if (e.key === "Escape") closeSheet(overlays.lastElementChild); });
 
-  const backBtn = `<button class="icon-btn" data-close aria-label="Back"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>`;
+  const WORDMARK = `<span class="wordmark">jalsa<sup>जलसा</sup></span>`;
 
   /* ============================================================
      ONBOARDING
      ============================================================ */
-  const VIBES = [
-    { id: "host", em: "🎪", nm: "The Planner", ds: "You make things happen. Constantly." },
-    { id: "chaos", em: "⚡", nm: "Chaos Agent", ds: "Loud plans, louder execution." },
-    { id: "soft", em: "🌿", nm: "Soft Launch", ds: "Intimate > everything." },
-    { id: "filmy", em: "🎬", nm: "Full Filmy", ds: "Every event is a production." },
-    { id: "foodie", em: "🍛", nm: "Khaana First", ds: "The menu IS the event." },
-    { id: "afterdark", em: "🌙", nm: "After Dark", ds: "Nothing good starts before 9." },
-  ];
-
   function renderOnboard(step = 0) {
     tabbar.classList.add("hidden");
     if (step === 0) {
+      const fan = [
+        { edition: "letterpress", ink: "bone", s: "left:2%;top:26px;transform:rotate(-9deg)" },
+        { edition: "riso", ink: "pinkblue", s: "left:33%;top:0;transform:rotate(2deg);z-index:2" },
+        { edition: "talkies", ink: "butter", s: "right:2%;top:30px;transform:rotate(10deg)" },
+      ];
       setScreen(`
-        <div class="onboard ob-cover">
-          <header class="mast">
-            <span class="mast-mark">JALSA<span class="dev">जलसा</span></span>
-            <span class="mast-meta">EST. BLR<br>VOL. 01</span>
-          </header>
-          <div class="rule"></div>
-          <div class="ob-word">
-            <span class="row"><span>Your</span></span>
-            <span class="row"><span>moments</span></span>
-            <span class="row"><span>live here.</span></span>
-          </div>
-          <div class="ob-caption">
-            <span class="ob-dev">जलसा</span>
-            <span><i>noun.</i> celebration, gathering — the vibe of a good time. Your people deserve better than a WhatsApp forward.</span>
-          </div>
-          <div class="ob-foot">
-            <button class="btn btn-ember" id="ob-next">Shuru karein <span aria-hidden="true">→</span></button>
-            <div class="mast-foot">THE INVITE IS THE EVENT · NO ALGORITHM · YOUR CIRCLE ONLY</div>
-          </div>
-        </div>`);
-      $("#ob-next").onclick = () => { haptic(); renderOnboard(1); };
-    }
-    else if (step === 1) {
-      setScreen(`
-        <div class="onboard">
-          <header class="mast">
-            <span class="mast-idx">01 <i>—</i> WHO ARE YOU</span>
-            <span class="mast-meta">01 / 02</span>
-          </header>
-          <div class="rule"></div>
-          <div class="ob-step">
-            <h2 class="ob-head">What do your <em>friends</em><br>call you?</h2>
-            <p class="hint">This goes on every invite you make. Choose wisely.</p>
-            <input class="ob-name" id="ob-name" maxlength="18" placeholder="Priya" autocomplete="off">
-          </div>
-          <div class="ob-foot">
-            <button class="btn btn-ember" id="ob-next" disabled>That's me</button>
-          </div>
-        </div>`);
-      const inp = $("#ob-name"), btn = $("#ob-next");
-      inp.focus();
-      inp.oninput = () => { btn.disabled = inp.value.trim().length < 2; };
-      btn.onclick = () => {
-        S.profile.name = inp.value.trim();
-        Store.save(); haptic(); renderOnboard(2);
-      };
-      inp.onkeydown = e => { if (e.key === "Enter" && !btn.disabled) btn.click(); };
-    }
-    else {
-      setScreen(`
-        <div class="onboard">
-          <header class="mast">
-            <span class="mast-idx">02 <i>—</i> YOUR TASTE</span>
-            <span class="mast-meta">02 / 02</span>
-          </header>
-          <div class="rule"></div>
-          <div class="ob-step">
-            <h2 class="ob-head">Pick your <em>energy</em>,<br>${esc(S.profile.name)}.</h2>
-            <p class="hint">Up to three. The engine reads this — your designs start where your taste lives.</p>
-            <div class="vibetags" id="vibes">
-              ${VIBES.map(v => `<button class="vibetag" data-v="${v.id}"><span class="em">${v.em}</span><span class="nm">${v.nm}</span></button>`).join("")}
+        <div class="cover">
+          <div class="cover-top"><span class="lab">An invitation press</span><span class="lab">Bengaluru · 2026</span></div>
+          <div class="cover-fan" id="fan"></div>
+          <div class="cover-word">
+            <span class="big">jalsa</span>
+            <span class="dev">जलसा</span>
+            <div class="entry-def">
+              <b>jal·sa</b> <i>(n.) Hindustani</i>
+              <ol><li>A gathering of people for celebration.</li><li>The sort of evening that deserves a proper invitation.</li></ol>
             </div>
           </div>
-          <div class="ob-foot">
-            <button class="btn btn-ember" id="ob-done" disabled>Enter the jalsa</button>
-          </div>
-        </div>`);
-      const picked = new Set();
-      $("#vibes").onclick = e => {
-        const c = e.target.closest(".vibetag"); if (!c) return;
-        const id = c.dataset.v;
-        if (picked.has(id)) { picked.delete(id); c.classList.remove("on"); }
-        else if (picked.size < 3) { picked.add(id); c.classList.add("on"); haptic(6); }
-        $("#ob-done").disabled = picked.size === 0;
-      };
-      $("#ob-done").onclick = () => {
-        S.profile.vibes = [...picked];
-        S.profile.onboarded = true;
-        Store.save(); haptic([20, 40, 20]);
-        tabbar.classList.remove("hidden");
-        nav("feed");
-        setTimeout(() => toast(`Welcome in, ${esc(S.profile.name)}. Your circle awaits.`), 500);
-      };
+          <p class="cover-lede">Describe your plan the way you'd text it. We set it in type, print it to a link, and keep the guest list.</p>
+          <button class="btn" id="go">Make it an occasion <span class="arr">→</span></button>
+        </div>`, { bare: true });
+      const sample = { title: "Kal Jalsa Hai", tagline: "Your presence is requested, and expected.", date: Store.dayOffset(3).date, time: "19:30", venue: "Indiranagar, Bengaluru", hostName: "Jalsa", slug: "cover" };
+      const sampleT = [{ ...sample }, { ...sample, title: "Doors at Nine" }, { ...sample, title: "House Full" }];
+      fan.forEach((f, i) => {
+        const slot = document.createElement("div");
+        slot.className = "fan-card";
+        slot.style.cssText = f.s;
+        $("#fan").appendChild(slot);
+        Editions.mount(slot, sampleT[i], { edition: f.edition, ink: f.ink, tagline: sample.tagline });
+      });
+      $("#go").onclick = () => { haptic(); renderOnboard(1); };
+      return;
     }
-  }
 
-  /* ============================================================
-     FEED  (Scene)
-     ============================================================ */
-  function renderFeed() {
-    const up = Store.upcoming();
-    const tick = "KAL JALSA HAI ✦ THE INVITE IS THE EVENT ✦ YOUR CIRCLE ONLY ✦ NO ALGORITHM ✦ ";
     setScreen(`
-      <div class="apphead">
-        <div>
-          <h1>The <em>Scene</em></h1>
-          <div class="sub">Bengaluru · your circle only</div>
+      <div class="cover">
+        <div class="cover-top"><span class="lab">Before we print anything</span><span class="lab">1 / 1</span></div>
+        <h2 class="c-h" style="margin-top:34px">How should we print <em>your name?</em></h2>
+        <p class="c-sub">It goes on every invitation you send. First name is plenty.</p>
+        <input class="name-in" id="nm" maxlength="18" placeholder="Priya" autocomplete="given-name" value="${esc(S.profile.name)}">
+        <div class="name-preview" id="np"></div>
+        <div style="margin-top:auto;padding-top:28px">
+          <button class="btn" id="done" disabled>That's me <span class="arr">→</span></button>
         </div>
-        <div class="head-right">
-          <button class="bell" id="pulse-bell" aria-label="Pulse">
-            <svg viewBox="0 0 24 24"><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>
-            ${S.pulse.length ? `<span class="bell-dot"></span>` : ""}
-          </button>
-          <div class="wordmark">JALSA<span class="dev">जलसा</span></div>
-        </div>
-      </div>
-      <div class="ticker"><div class="ticker-inner">${tick.repeat(2)}</div></div>
-      <div class="feed" id="feed">
-        ${up.length ? up.map((ev, i) => feedCard(ev, i)).join("") : `
-          <div class="empty">
-            <div class="big">Nothing here yet.</div>
-            <p>Fix that. Tap <b style="color:var(--ember)">+</b> and make something worth showing up for.</p>
-          </div>`}
-      </div>`);
-    bindFeed();
-    startCountdowns();
-    const bell = $("#pulse-bell");
-    if (bell) bell.onclick = () => { haptic(8); openPulseOverlay(); };
-  }
-
-  function feedCard(ev, i) {
-    const c = ev.concept;
-    const my = S.myRsvps[ev.id];
-    const cd = countdown(ev);
-    const yes = ev.rsvps.filter(r => r.status === "yes");
-    const spotsLeft = ev.capacity ? ev.capacity - goingCount(ev) : null;
-    return `
-    <article class="feedcard" style="--i:${i}" data-ev="${ev.id}">
-      <button class="fc-hero" data-open="${ev.id}" style="${Templates.heroStyle(c)};width:100%;text-align:left;display:flex;flex-direction:column;justify-content:space-between">
-        <span class="fc-type">${ev.glyph} ${esc(Engine.TYPES[ev.typeKey]?.label || "Jalsa")} · by ${esc(ev.hostName)}${ev.isMine ? " (you)" : ""}</span>
-        <span>
-          <span class="fc-title" style="${Templates.heroTitleStyle(c)}">${esc(ev.title)}</span>
-          <span class="fc-tag" style="display:block">${esc(ev.tagline)}</span>
-        </span>
-        ${cd === "LIVE" ? `<span class="fc-live">● LIVE NOW</span>` : cd ? `<span class="fc-countdown" data-cd="${ev.id}">${cd}</span>` : ""}
-      </button>
-      <div class="fc-body">
-        <div class="fc-meta">
-          <span>🗓 <b>${whenLine(ev)}</b></span>
-          <span>📍 <b>${esc(ev.venue || "TBD")}</b></span>
-          ${ev.audience && ev.audience.mode === "some" ? `<span class="fc-private">🔒 ${ev.audience.names.length ? esc(ev.audience.names.slice(0, 2).join(", ")) + (ev.audience.names.length > 2 ? ` +${ev.audience.names.length - 2}` : "") : "Chosen ones"}</span>` : ""}
-          ${spotsLeft !== null && spotsLeft <= 5 && spotsLeft > 0 ? `<span style="color:var(--ember)">🔥 ${spotsLeft} spots left. You know what to do.</span>` : ""}
-        </div>
-        <div class="fc-foot">
-          <div style="display:flex;align-items:center">
-            <div class="avstack">${yes.slice(0, 4).map(avatarHTML).join("")}${yes.length > 4 ? `<div class="avmore">+${yes.length - 4}</div>` : ""}</div>
-            <span class="going-label"><b>${goingCount(ev)}</b> in${ev.capacity ? ` / ${ev.capacity}` : ""}</span>
-          </div>
-          ${ev.isMine
-            ? `<button class="btn btn-ghost btn-sm" data-host="${ev.id}">Host desk →</button>`
-            : rsvpRow(ev, my, true)}
-        </div>
-      </div>
-    </article>`;
-  }
-
-  function rsvpRow(ev, my, compact = false) {
-    const full = ev.capacity && goingCount(ev) >= ev.capacity && my !== "yes";
-    const yesLabel = full ? "Waitlist" : "I'm in";
-    return `
-      <div class="rsvp-row" style="${compact ? "min-width:210px" : ""}">
-        <button class="rsvp-btn ${my === "yes" ? "sel-yes" : my === "wait" ? "sel-wait" : my ? "dim" : ""}" data-rsvp="yes" data-ev="${ev.id}">
-          ${my === "yes" ? "In ✓" : my === "wait" ? "Waitlisted" : yesLabel}
-        </button>
-        <button class="rsvp-btn ${my === "maybe" ? "sel-maybe" : my ? "dim" : ""}" data-rsvp="maybe" data-ev="${ev.id}">
-          ${my === "maybe" ? "Hmm…" : "Maybe"}
-        </button>
-        <button class="rsvp-btn ${my === "no" ? "sel-no" : my ? "dim" : ""}" data-rsvp="no" data-ev="${ev.id}">
-          ${my === "no" ? "Out" : "Can't"}
-        </button>
-      </div>`;
-  }
-
-  function bindFeed(root = screen) {
-    root.onclick = e => {
-      const open = e.target.closest("[data-open]");
-      if (open) { openInvite(open.dataset.open); return; }
-      const host = e.target.closest("[data-host]");
-      if (host) { openHost(host.dataset.host); return; }
-      const rs = e.target.closest("[data-rsvp]");
-      if (rs) { doRsvp(rs.dataset.ev, rs.dataset.rsvp, rs); return; }
+      </div>`, { bare: true });
+    const inp = $("#nm"), btn = $("#done");
+    const paint = () => {
+      const n = inp.value.trim();
+      btn.disabled = n.length < 2;
+      Editions.mount($("#np"),
+        { title: "Kal Jalsa Hai", date: Store.dayOffset(3).date, time: "19:30", venue: "Your place", hostName: n || "You", slug: "name" },
+        { edition: "letterpress", ink: "bone", tagline: "Your presence is requested, and expected." });
+    };
+    paint();
+    inp.oninput = paint;
+    inp.onkeydown = e => { if (e.key === "Enter" && !btn.disabled) btn.click(); };
+    setTimeout(() => inp.focus(), 300);
+    btn.onclick = () => {
+      S.profile.name = inp.value.trim().replace(/^\w/, c => c.toUpperCase());
+      S.profile.onboarded = true;
+      Store.save(); haptic([12, 40, 12]);
+      tabbar.classList.remove("hidden");
+      const next = S._after; delete S._after;
+      nav("upcoming");
+      if (next === "new") openCreate();
     };
   }
 
-  let cdTimer = null;
-  function startCountdowns() {
-    clearInterval(cdTimer);
-    cdTimer = setInterval(() => {
-      $$("[data-cd]").forEach(el => {
-        const ev = Store.ev(el.dataset.cd);
-        if (ev) { const c = countdown(ev); if (c) el.textContent = c; }
-      });
-    }, 30000);
+  /* ============================================================
+     UPCOMING
+     ============================================================ */
+  function renderUpcoming() {
+    const up = Store.upcoming();
+    const [next, ...rest] = up;
+    const unread = S.notes.length;
+    setScreen(`
+      <header class="mast">
+        <div class="mast-row">${WORDMARK}
+          <div class="mast-tools"><button class="textbtn" id="notes">Notes${unread ? `<span class="n">${unread}</span>` : ""}</button></div>
+        </div>
+        <h1>Upcoming</h1>
+        <p>${up.length ? `${up.length} occasion${up.length > 1 ? "s" : ""} in your circle, ${esc(S.profile.name)}.` : "Nothing on the calendar yet."}</p>
+      </header>
+      ${next ? nextCard(next) : `
+        <div class="empty"><h3>A clear calendar.</h3><p>Describe a plan in one line and we'll make it an occasion.</p>
+        <button class="btn btn-sm" data-new style="margin:0 auto">Start an invitation</button></div>`}
+      ${rest.length ? `<div class="section"><h2>Later</h2><span class="lab">${rest.length}</span></div>
+        <div id="later">${rest.map(entryRow).join("")}</div>` : ""}
+    `);
+    mountThumbs();
+    $("#notes").onclick = openNotes;
+    screen.onclick = e => {
+      const o = e.target.closest("[data-open]");
+      if (o) { openInvite(o.dataset.open); return; }
+      if (e.target.closest("[data-new]")) openCreate();
+    };
   }
 
-  /* ============================ rsvp logic =================== */
-  function doRsvp(id, status, btnEl) {
-    const ev = Store.ev(id);
-    if (!ev) return;
-    const prev = S.myRsvps[id];
-    if (prev === status) { delete S.myRsvps[id]; Store.save(); refreshCurrent(); return; }
-
-    if (status === "yes" && ev.capacity && goingCount(ev) >= ev.capacity) {
-      S.myRsvps[id] = "wait";
-      Store.save(); haptic([10, 30, 10, 30, 10]);
-      toast(`Full house. You're #1 on the waitlist — spots open up, you're in.`);
-      refreshCurrent(); return;
-    }
-
-    S.myRsvps[id] = status;
-    Store.save();
-
-    if (status === "yes") {
-      haptic(35);
-      if (btnEl) burst(btnEl);
-      const lines = [
-        `You're in. ${esc(ev.hostName)} is going to be insufferable about this.`,
-        `Locked. Now don't be the "5 min away" person.`,
-        `Confirmed. The vibe just improved measurably.`,
-      ];
-      toast(lines[Math.floor(Math.random() * lines.length)]);
-      Store.addPulse(`<b>You</b> RSVP'd yes to <b>${esc(ev.title)}</b>`);
-    } else if (status === "maybe") {
-      haptic(12);
-      toast(`Noted. "Maybe" means no and everyone knows it. 👀`);
-    } else {
-      haptic(8);
-      toast(`Fair. ${esc(ev.hostName)} will recover. Eventually.`);
-    }
-    setTimeout(refreshCurrent, 120);
+  function nextCard(ev) {
+    const my = ev.isMine ? "host" : S.myReplies[ev.id];
+    const c = counts(ev);
+    return `
+      <button class="next" data-open="${ev.id}" style="display:block;width:calc(100% - 40px);text-align:left">
+        <span class="next-card" data-thumb="${ev.id}"></span>
+        <span class="next-meta">
+          <span>
+            <span class="lab">Next · ${esc(shortDate(ev))}</span>
+            <h3>${esc(ev.title)}</h3>
+            <span style="display:flex;align-items:center;gap:10px;margin-top:8px">${faces(replies(ev).concat(my === "yes" ? [{ name: S.profile.name || "You", hue: 250, status: "yes" }] : []))}<span class="lab">${c.yes} attending</span></span>
+          </span>
+          <span style="display:flex;flex-direction:column;align-items:flex-end;gap:10px">
+            <span class="count">${esc(until(ev))}</span>
+            ${my === "host" ? `<span class="stamp">Hosting</span>` : stampHTML(my)}
+          </span>
+        </span>
+      </button>`;
   }
 
-  function refreshCurrent() {
-    if (overlayRoot.children.length) return; // overlay handles its own refresh
-    nav(currentNav);
+  function entryRow(ev) {
+    const my = ev.isMine ? "host" : S.myReplies[ev.id];
+    const d = Editions.parts(ev);
+    return `
+      <button class="entry" data-open="${ev.id}">
+        <span class="entry-thumb" data-thumb="${ev.id}"></span>
+        <span>
+          <span class="entry-date"><b>${esc(d.day)}</b><span class="lab">${esc(d.mo3 || "")} · ${esc(d.dw3 || "")}</span></span>
+          <h3>${esc(ev.title)}</h3>
+          <p>${ev.isMine ? "Your occasion" : "From " + esc(ev.hostName)} · ${esc(Engine.formatTime(ev.time))}</p>
+          <span class="foot">${faces(replies(ev), 3)}${my === "host" ? `<span class="stamp">Hosting</span>` : my ? stampHTML(my) : `<span class="lab" style="color:var(--stamp)">Reply →</span>`}</span>
+        </span>
+      </button>`;
+  }
+
+  function mountThumbs(root = screen) {
+    $$("[data-thumb]", root).forEach(slot => {
+      const ev = Store.ev(slot.dataset.thumb);
+      if (ev) Editions.mount(slot, ev, ev.concept);
+    });
+  }
+
+  function openNotes() {
+    haptic(6);
+    openSheet("Notes from your circle", `
+      <div class="pad" style="padding-top:8px">
+        ${S.notes.map(n => `<div class="fact" style="grid-template-columns:1fr auto;cursor:default"><span>${n.text}</span><span class="lab">${timeAgo(n.at)}</span></div>`).join("")}
+        <p class="prose" style="margin:18px 0 0">Only people you've invited, or who've invited you. No strangers, no feed.</p>
+      </div>`);
   }
 
   /* ============================================================
-     INVITE VIEWER — the reveal
+     INVITE — the card and its reply slip
      ============================================================ */
   function openInvite(id, { reveal = true } = {}) {
     const ev = Store.ev(id);
     if (!ev) return;
-    const my = S.myRsvps[id];
-    const paid = S.myPaid[id];
-    const isPast = Store.isPast(ev);
+    if (ev.public) { openListing(ev, reveal); return; }
+    const past = Store.isPast(ev);
+    const c = counts(ev);
 
-    const ov = openOverlay(`
-      <div class="viewer ov-scroll">
-        <div class="invite-wrap" id="inv-slot"></div>
-        <div class="viewer-actions">
-          ${backBtn}
-          <button class="icon-btn" data-share aria-label="Share"><svg viewBox="0 0 24 24"><path d="M12 15V4m0 0L8 8m4-4 4 4"/><path d="M5 13v6a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-6"/></svg></button>
-        </div>
-        <div class="sheet detail-sheet">
-          <div class="grab"></div>
-          <div class="ds-title">${esc(ev.title)}</div>
-          <div class="ds-host">hosted by <b style="color:var(--pearl)">${esc(ev.hostName)}${ev.isMine ? " (you)" : ""}</b> · ${goingCount(ev)} going${ev.capacity ? ` · ${Math.max(0, ev.capacity - goingCount(ev))} spots left` : ""}</div>
+    const sh = openSheet(ev.isMine ? "Your occasion" : `From ${esc(ev.hostName)}`, `
+      <div class="viewer-card" id="card"></div>
+      <div class="slip">
+        <h2>${esc(ev.title)}</h2>
+        <p class="by">${esc(ev.tagline)}</p>
+        ${factsHTML(ev)}
+        ${ev.upiAmount && !ev.isMine && !past ? payHTML(ev) : ""}
+        ${(ev.updates || []).map(u => `<div class="note-card">${esc(u.text)}<span class="lab">${esc(ev.hostName)} · ${timeAgo(u.at)}</span></div>`).join("")}
+        ${past
+          ? `<div class="gap"></div><button class="btn btn-line" data-album>Open the keepsake <span class="arr">→</span></button>`
+          : ev.isMine
+            ? `<div class="gap"></div><div class="stack"><button class="btn" data-register>Open the register <span class="arr">→</span></button><button class="btn btn-line" data-share>Send on WhatsApp</button></div>`
+            : `<div id="reply-slot"></div><div class="gap"></div><button class="btn btn-line" data-share>Forward to someone</button>`}
+        <p class="lab" style="margin-top:18px;text-align:center">${c.yes} accepted · ${c.maybe} pencilled · ${c.no} regrets</p>
+      </div>`, { table: true });
 
-          <div class="ds-grid">
-            <div class="ds-cell tap" data-ics>
-              <div class="k">When · tap to save</div>
-              <div class="v">${whenLine(ev)} <span class="go">＋ CAL</span></div>
-            </div>
-            <div class="ds-cell tap" data-maps>
-              <div class="k">Where · tap for maps</div>
-              <div class="v">${esc(ev.venue || "Location drops soon")} <span class="go">↗ MAP</span></div>
-            </div>
-          </div>
+    Editions.mount($("#card", sh), ev, ev.concept, { reveal });
+    haptic(reveal ? [6, 50, 6] : 4);
 
-          ${ev.upiAmount ? `
-          <div class="upi-card">
-            <div class="amt">₹${ev.upiAmount}</div>
-            <div class="why">per head · collected upfront so nobody chases anybody.<br><span style="font-family:var(--font-mono);font-size:9px;letter-spacing:.08em">THE VENUE DOES NOT ACCEPT VIBES AS PAYMENT.</span></div>
-            <button class="pay ${paid ? "done" : ""}" data-pay>${paid ? "PAID ✓" : "PAY UPI"}</button>
-          </div>` : ""}
+    const slot = $("#reply-slot", sh);
+    if (slot) mountReply(slot, {
+      current: S.myReplies[ev.id], askName: false,
+      onReply: status => {
+        S.myReplies[ev.id] = status;
+        Store.note(`<b>You</b> ${status === "yes" ? "accepted" : status === "no" ? "sent regrets to" : "pencilled in"} <i>${esc(ev.title)}</i>`);
+        Store.save();
+        if (ev.cloudId) Cloud.rsvp(ev.cloudId, S.profile.name, status);
+        toast(status === "yes" ? `${ev.hostName} will be pleased.` : status === "no" ? `${ev.hostName} has been told, kindly.` : "Pencilled in. Do confirm when you can.");
+      },
+    });
 
-          ${ev.updates.length ? `
-            <div class="section-label">Updates from ${esc(ev.hostName)}</div>
-            ${ev.updates.map(u => `<div class="updatecard">${esc(u.text)}<div class="when">${timeAgo(u.at)}</div></div>`).join("")}
-          ` : ""}
+    sh.addEventListener("click", e => {
+      if (e.target.closest("[data-share]")) shareEvent(ev);
+      else if (e.target.closest("[data-ics]")) downloadICS(ev);
+      else if (e.target.closest("[data-maps]")) openMaps(ev.venue);
+      else if (e.target.closest("[data-pay]")) payUPI(ev, e.target.closest("[data-pay]"));
+      else if (e.target.closest("[data-album]")) closeSheet(sh, () => openAlbum(ev.id));
+      else if (e.target.closest("[data-register]")) closeSheet(sh, () => openRegister(ev.id));
+    });
+  }
 
-          ${isPast
-            ? `<button class="btn btn-ghost" data-album style="margin-top:8px">Open the memory album →</button>`
-            : ev.isMine
-              ? `<button class="btn btn-ember" data-hostdesk style="margin-top:8px">Open host desk</button>`
-              : `<div class="section-label">Your answer</div>${rsvpRow(ev, my)}`
-          }
-          <div class="spacer"></div>
-          <button class="btn btn-line" data-share>Share on WhatsApp — the invite does the talking</button>
-          <div class="spacer"></div>
-        </div>
-      </div>`);
+  function factsHTML(ev) {
+    return `
+      <div class="facts">
+        <button class="fact" data-ics><span class="lab">When</span><b>${esc(Engine.longDate(ev))}, ${esc(Engine.formatTime(ev.time))}</b><span class="go">Calendar</span></button>
+        <button class="fact" data-maps><span class="lab">Where</span><b>${esc(ev.venue || "To follow")}</b><span class="go">${ev.venue ? "Map" : ""}</span></button>
+        ${ev.capacity ? `<div class="fact"><span class="lab">Places</span><b>${Math.max(0, ev.capacity - counts(ev).yes)} of ${ev.capacity} left</b><span></span></div>` : ""}
+      </div>`;
+  }
 
-    // render the invite artwork (query by class, not id — a closing overlay
-    // may still hold a duplicate #inv-slot while it animates out)
-    const slot = ov.querySelector(".invite-wrap");
-    const invEl = Templates.render(ev, ev.concept, { reveal });
-    slot.appendChild(invEl);
-    haptic(reveal ? [8, 60, 8] : 6);
+  function payHTML(ev) {
+    const paid = S.myPaid[ev.id];
+    return `
+      <div class="pay-card">
+        <div><b>₹${ev.upiAmount}</b><p>a head, settled here so nobody has to ask twice.</p></div>
+        <button class="btn btn-sm ${paid ? "btn-line" : ""}" data-pay>${paid ? "Paid ✓" : "Pay by UPI"}</button>
+      </div>`;
+  }
 
-    ov.onclick = e => {
-      if (e.target.closest("[data-close]")) { closeOverlay(ov); refreshCurrent(); return; }
-      if (e.target.closest("[data-share]")) { shareEvent(ev); return; }
-      if (e.target.closest("[data-ics]")) { downloadICS(ev); return; }
-      if (e.target.closest("[data-maps]")) { openMaps(ev); return; }
-      if (e.target.closest("[data-pay]")) { payUPI(ev, e.target.closest("[data-pay]")); return; }
-      if (e.target.closest("[data-album]")) { closeOverlay(ov); openAlbum(ev.id); return; }
-      if (e.target.closest("[data-hostdesk]")) { closeOverlay(ov); openHost(ev.id); return; }
-      const rs = e.target.closest("[data-rsvp]");
-      if (rs) {
-        doRsvp(rs.dataset.ev, rs.dataset.rsvp, rs);
-        closeOverlay(ov); openInvite(id, { reveal: false });
+  /* the reply card: three printed options, one rubber stamp */
+  function mountReply(slot, { current, askName, onReply, name = "" }) {
+    function paint(stamped) {
+      slot.innerHTML = `
+        <div class="reply">
+          <div class="reply-h"><h3>Kindly reply</h3><span class="lab">RSVP</span></div>
+          ${askName ? `<input class="reply-name" id="rn" maxlength="30" placeholder="Your name, as the host knows it" value="${esc(name)}" autocomplete="given-name">` : ""}
+          ${["yes", "no", "maybe"].map(k => `
+            <button class="opt ${current === k ? "on" : current ? "off" : ""}" data-r="${k}"><i>${current === k ? "✓" : ""}</i>${STATUS[k].opt}</button>`).join("")}
+          <div class="stamp-slot">${current ? `<span class="stamp big ${STATUS[current].cls} ${stamped ? "thud" : ""}">${STATUS[current].stamp}<small>${new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short" }).toUpperCase()}</small></span>` : ""}</div>
+        </div>`;
+    }
+    paint(false);
+    slot.onclick = e => {
+      const b = e.target.closest("[data-r]");
+      if (!b) return;
+      const nameIn = $("#rn", slot);
+      if (askName) {
+        name = nameIn.value.trim();
+        if (name.length < 2) { nameIn.focus(); nameIn.placeholder = "Your name first, please"; haptic([8, 30, 8]); return; }
       }
+      current = b.dataset.r;
+      haptic(current === "yes" ? [10, 30, 40] : 14);
+      paint(true);
+      onReply(current, name);
     };
   }
 
-  /* ---------------- external actions ------------------------- */
-  function inviteURL(ev) {
-    // self-contained link: the whole invite rides in the hash, no backend needed
-    const base = location.origin && location.origin !== "null"
-      ? location.origin + location.pathname
-      : "https://jalsa.app/i";
-    return base + "#i=" + Store.encodeEvent(ev);
+  /* ---------------- outbound ---------------------------------- */
+  function base() { return /^https?:/.test(location.protocol) ? location.origin + location.pathname : "https://jalsa.invalid/"; }
+  function linkFor(ev) {
+    if (Cloud.enabled && ev.cloudOk) return base() + "#e=" + encodeURIComponent(ev.slug);
+    return base() + "#i=" + Store.encodeEvent(ev);
   }
 
-  function cloudURL(code) {
-    const base = location.origin && location.origin !== "null"
-      ? location.origin + location.pathname
-      : "https://jalsa.app/i";
-    return base + "#e=" + code;
-  }
-
-  function shareEvent(ev) {
-    haptic(10);
-    // Prefer a live cloud link so the invite + headcount work across phones.
-    // The code is the slug (known now), so the link is ready immediately and we
-    // publish in the background. Falls back to the self-contained #i= link.
-    let link = inviteURL(ev);
-    if (Cloud.enabled && ev.slug) {
-      ev.cloudId = ev.slug;
-      if (ev.isMine) Store.save();
-      Cloud.publish(ev);
-      link = cloudURL(ev.slug);
-    }
-    const text = Engine.shareText(ev, S.profile.name, link);
-    if (navigator.share) {
-      navigator.share({ title: ev.title, text }).catch(() => {});
-      return;
-    }
-    window.open("https://wa.me/?text=" + encodeURIComponent(text), "_blank");
-    navigator.clipboard?.writeText(text).then(() => toast("Invite copied too — paste anywhere.")).catch(() => {});
+  async function shareEvent(ev) {
+    haptic(8);
+    if (ev.isMine && Cloud.enabled && !ev.cloudOk) { ev.cloudOk = !!(await Cloud.publish(ev)); Store.save(); }
+    const text = Engine.shareText(ev, linkFor(ev));
+    if (navigator.share) { navigator.share({ title: ev.title, text }).catch(() => {}); return; }
+    open("https://wa.me/?text=" + encodeURIComponent(text), "_blank");
   }
 
   function downloadICS(ev) {
+    if (!ev.date) { toast("The date is still to follow."); return; }
     const dt = new Date(ev.date + "T" + (ev.time || "19:00"));
     const end = new Date(dt.getTime() + 3 * 36e5);
     const f = d => d.toISOString().replace(/[-:]/g, "").slice(0, 15) + "Z";
-    const ics = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//JALSA//EN", "BEGIN:VEVENT",
-      `UID:${ev.slug}@jalsa.app`, `DTSTART:${f(dt)}`, `DTEND:${f(end)}`,
-      `SUMMARY:${ev.title}`, `DESCRIPTION:${ev.tagline} — RSVP'd on JALSA`, `LOCATION:${ev.venue || ""}`,
+    const ics = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//jalsa//EN", "BEGIN:VEVENT",
+      `UID:${ev.slug}@jalsa`, `DTSTART:${f(dt)}`, `DTEND:${f(end)}`,
+      `SUMMARY:${ev.title}`, `DESCRIPTION:${ev.tagline || ""}`, `LOCATION:${ev.venue || ""}`,
       "END:VEVENT", "END:VCALENDAR"].join("\r\n");
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([ics], { type: "text/calendar" }));
-    a.download = ev.slug + ".ics";
+    a.download = (ev.slug || "jalsa") + ".ics";
     a.click();
-    toast("Calendar file saved. No excuses now.");
-    haptic(10);
+    toast("Added to your calendar.");
   }
 
-  function openMaps(ev) {
-    if (!ev.venue) { toast("Location drops soon. Patience."); return; }
-    window.open("https://www.google.com/maps/search/" + encodeURIComponent(ev.venue + " Bengaluru"), "_blank");
-  }
+  function openMaps(v) { if (v) open("https://www.google.com/maps/search/" + encodeURIComponent(v + ", Bengaluru"), "_blank"); }
 
   function payUPI(ev, btn) {
     if (S.myPaid[ev.id]) return;
-    const vpa = ev.upiId || "jalsa@upi";
-    const url = `upi://pay?pa=${encodeURIComponent(vpa)}&pn=${encodeURIComponent(ev.hostName + " via JALSA")}&am=${ev.upiAmount}&cu=INR&tn=${encodeURIComponent(ev.title)}`;
-    // attempt deep link (works on phones with UPI apps)
-    location.href = url;
+    if (!ev.upiId) { toast(`${ev.hostName} hasn't added a UPI ID yet.`); return; }
+    location.href = `upi://pay?pa=${encodeURIComponent(ev.upiId)}&pn=${encodeURIComponent(ev.hostName)}&am=${ev.upiAmount}&cu=INR&tn=${encodeURIComponent(ev.title)}`;
     setTimeout(() => {
       S.myPaid[ev.id] = true; Store.save();
-      if (btn) { btn.textContent = "PAID ✓"; btn.classList.add("done"); burst(btn); }
-      haptic([15, 40, 15]);
-      toast(`₹${ev.upiAmount} marked paid. ${esc(ev.hostName)} says thanks (for once).`);
+      if (btn) { btn.textContent = "Paid ✓"; btn.classList.add("btn-line"); }
+      toast(`Marked as paid. ${ev.hostName} will see it.`);
     }, 900);
   }
 
   /* ============================================================
-     CREATE FLOW
+     CREATE — brief → proofs → the proof desk → details → sent
      ============================================================ */
-  const PLACEHOLDERS = [
-    "rooftop birthday, 20 people, sunset vibes, we're going to be loud",
-    "chill Sunday coffee + books at Dyu, 6 of us max",
-    "Holi at the farmhouse!! wear white, full chaos",
-    "farewell dinner for Sana, she's moving to Bombay :(",
-    "FIFA night at my place, loser buys biryani",
+  const STARTERS = [
+    ["Birthday", "rooftop birthday for Ananya, sunset, twenty of us"],
+    ["House party", "house party at mine, loud, doors at nine"],
+    ["Dinner", "small dinner at home, eight people, bring a dish"],
+    ["Farewell", "farewell for Sana, she's moving to Bombay"],
+    ["Screening", "RCB match screening at my place, wear the jersey"],
+    ["Coffee", "slow sunday coffee and books at Dyu, six of us"],
   ];
 
   function openCreate() {
-    let brief = null, picked = 0, reroll = 0, lastText = "";
-    let customTitle = null;                 // manual title override
-    let origSnapshot = null;                // pristine design, for "reset"
-    let audience = { mode: "all", names: [] };
-    let inspoPalette = null;                // [bg,ink,a,pop] pulled from an uploaded inspo pic
-    let customPhoto = null;                 // compressed data URL for photo-poster templates
+    if (!S.profile.onboarded) { S._after = "new"; renderOnboard(0); return; }
+    const st = { text: "", brief: null, pick: 0, reroll: 0, concept: null, title: "", photo: null, commission: null };
+    const sh = openSheet("New invitation", `<div id="cstage"></div>`);
+    const stage = $("#cstage", sh);
+    const draft = () => ({
+      title: st.title || st.brief.title, date: Store.dayOffset(7).date, time: st.brief.time,
+      venue: "", hostName: S.profile.name, photo: st.photo, slug: "draft-" + st.text.length,
+    });
+    describe();
 
-    // shrink an uploaded image to a data URL small enough for localStorage
-    function compressPhoto(file, max = 820) {
-      return new Promise((resolve, reject) => {
-        const img = new Image();
-        img.onload = () => {
-          const scale = Math.min(1, max / Math.max(img.width, img.height));
-          const cv = document.createElement("canvas");
-          cv.width = Math.round(img.width * scale);
-          cv.height = Math.round(img.height * scale);
-          cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
-          URL.revokeObjectURL(img.src);
-          resolve(cv.toDataURL("image/jpeg", 0.82));
-        };
-        img.onerror = reject;
-        img.src = URL.createObjectURL(file);
-      });
-    }
-
-    const ov = openOverlay(`
-      <div class="ov-top">${backBtn}<span class="ov-title">New Jalsa</span><span style="width:40px"></span></div>
-      <div class="ov-scroll"><div id="create-stage"></div></div>`);
-    const stage = $("#create-stage", ov);
-    ov.querySelector("[data-close]").onclick = () => closeOverlay(ov);
-
-    stepDescribe();
-
-    /* ---- step 1 : describe ---------------------------------- */
-    function stepDescribe() {
+    /* 1 · the brief */
+    function describe() {
       stage.innerHTML = `
-        <div class="create-body">
-          <h2 class="create-h">Describe it like you'd<br>text it. <span style="color:var(--ember)">We design it.</span></h2>
-          <p class="create-sub">No forms. No dropdowns. Type the vibe — the engine reads event type, energy, and crowd, then designs three invites.</p>
-          <div class="describe-box">
-            <textarea id="desc" maxlength="280" placeholder="${PLACEHOLDERS[Math.floor(Math.random() * PLACEHOLDERS.length)]}"></textarea>
-            <div class="vibe-read" id="vibe-read"><span class="lab">VIBE READ —</span><span style="color:var(--slate)">start typing…</span></div>
-          </div>
-          <div class="section-label">or start from a classic</div>
-          <div class="chiprow scroll" id="typechips">
-            ${Object.entries(Engine.TYPES).filter(([k]) => k !== "generic").slice(0, 12).map(([k, d]) =>
-              `<button class="chip" data-t="${k}">${d.glyph} ${d.label}</button>`).join("")}
-          </div>
-          <div class="section-label">have a look in mind?</div>
-          <label class="inspo-drop" id="cr-inspo">
-            <input type="file" id="cr-inspo-file" accept="image/*" hidden>
-            <span id="cr-inspo-label">＋ Add an inspo pic — the designs borrow its palette</span>
-          </label>
-          <div class="spacer"></div>
-          <button class="btn btn-ember" id="gen-btn" disabled>Design my invite ✦</button>
-          <p class="mic-note">FREE TEXT IN · DESIGNED INVITE OUT · 12 SECONDS</p>
+        <div class="c-pad">
+          <span class="lab">Step 1 of 4 · The brief</span>
+          <h2 class="c-h">Tell us about it the way <em>you'd text it.</em></h2>
+          <p class="c-sub">Who, what, roughly when, and the mood. We'll read it and set three proofs.</p>
+          <textarea class="brief" id="brief" maxlength="280" placeholder="${esc(STARTERS[Math.floor(Math.random() * STARTERS.length)][1])}">${esc(st.text)}</textarea>
+          <div class="reading" id="reading"></div>
+          <span class="lab" style="display:block;margin-top:18px">Or begin from</span>
+          <div class="starters">${STARTERS.map(([l, t]) => `<button class="filter" data-s="${esc(t)}">${l}</button>`).join("")}</div>
+          <button class="btn" id="pull" disabled>Set three proofs <span class="arr">→</span></button>
         </div>`;
-      const ta = $("#desc", stage), gen = $("#gen-btn", stage), vr = $("#vibe-read", stage);
-      const inspoFile = $("#cr-inspo-file", stage);
-      if (inspoFile) inspoFile.onchange = () => {
-        const f = inspoFile.files && inspoFile.files[0]; if (!f) return;
-        $("#cr-inspo-label", stage).textContent = "Reading your inspo…";
-        extractPalette(f).then(cols => {
-          inspoPalette = mapInspo(cols);
-          $("#cr-inspo-label", stage).innerHTML =
-            `✓ Locked to your inspo` +
-            `<span style="display:inline-flex;gap:5px;margin-left:10px;vertical-align:middle">` +
-            inspoPalette.map(h => `<i style="width:15px;height:15px;border-radius:4px;background:${h};display:inline-block"></i>`).join("") +
-            `</span>`;
-          haptic(12);
-        }).catch(() => { $("#cr-inspo-label", stage).textContent = "Couldn't read that image — try another"; });
-      };
-      if (lastText) { ta.value = lastText; updateRead(); }
-      ta.focus();
-      ta.oninput = updateRead;
-      function updateRead() {
-        lastText = ta.value;
-        gen.disabled = ta.value.trim().length < 6;
+      const ta = $("#brief", stage), go = $("#pull", stage);
+      const read = () => {
+        st.text = ta.value;
+        go.disabled = ta.value.trim().length < 6;
         const toks = Engine.read(ta.value);
-        vr.innerHTML = `<span class="lab">VIBE READ —</span>` +
-          (toks.length ? toks.map(t => `<span class="tok">${esc(t)}</span>`).join("") : `<span style="color:var(--slate)">start typing…</span>`);
-      }
-      $("#typechips", stage).onclick = e => {
-        const c = e.target.closest(".chip"); if (!c) return;
-        const d = Engine.TYPES[c.dataset.t];
-        ta.value = (d.label.toLowerCase() + ", " + (ta.value || "")).replace(/, $/, "");
-        updateRead(); ta.focus(); haptic(6);
+        $("#reading", stage).innerHTML = toks.length ? `<span class="lab">Reading</span>` + toks.map(t => `<span class="tok">${esc(t)}</span>`).join("") : "";
       };
-      gen.onclick = () => { haptic(12); stepGenerate(ta.value.trim()); };
+      ta.oninput = read; read();
+      setTimeout(() => ta.focus(), 350);
+      $(".starters", stage).onclick = e => { const b = e.target.closest("[data-s]"); if (b) { ta.value = b.dataset.s; read(); haptic(5); } };
+      go.onclick = () => { haptic(10); press(); };
     }
 
-    /* ---- step 2 : generation theatre ------------------------- */
-    function stepGenerate(text) {
-      const taste = tasteTier();
-      brief = Engine.generate(text, { tasteTier: taste, reroll });
-      // if the user gave an inspo pic, recolour every concept to its palette
-      if (inspoPalette) {
-        brief.concepts.forEach(c => {
-          c.pal = Object.assign({}, c.pal, { bg: inspoPalette[0], ink: inspoPalette[1], a: inspoPalette[2], pop: inspoPalette[3] });
-        });
-      }
-      stage.innerHTML = `
-        <div class="gen-theatre">
-          <div class="gen-orb"></div>
-          <div class="gen-word" id="gen-word">Reading the vibe…</div>
-          <div class="gen-line" id="gen-line">&nbsp;</div>
-        </div>`;
+    /* 2 · the press runs */
+    function press() {
+      st.brief = Engine.generate(st.text, { reroll: st.reroll, houseStyle: houseStyle() });
+      st.title = st.brief.title; st.pick = 0;
+      const p0 = st.brief.proofs[0], ed0 = Editions.get(p0.edition);
       const lines = [
-        [`Reading the vibe…`, ``],
-        [`Type locked.`, `${brief.glyph} ${brief.typeLabel.toUpperCase()}`],
-        [`Mixing palette…`, brief.concepts[0].pal.name.toUpperCase()],
-        [`Kerning aggressively.`, `TRACKING +${80 + (brief.energy + 3) * 20}`],
-        [`Adding grain.`, `THEN MORE GRAIN`],
-        [`Rendering…`, `3 CONCEPTS · 3 STUDIOS`],
+        ["Reading the brief", st.brief.typeLabel],
+        ["Setting the type", st.brief.title],
+        ["Mixing the ink", Editions.inkOf(p0).name],
+        ["Pulling three proofs", st.brief.proofs.map(p => Editions.get(p.edition).name).join(" · ")],
       ];
+      stage.innerHTML = `
+        <div class="press">
+          <div class="press-sheets"><i style="--r:-1"></i><i style="--r:1"></i><i style="--r:-.5"></i></div>
+          <div class="press-line" id="pl">${lines[0][0]}</div>
+          <div class="lab press-sub" id="ps">${esc(lines[0][1])}</div>
+        </div>`;
       let i = 0;
-      const word = $("#gen-word", stage), line = $("#gen-line", stage);
       const iv = setInterval(() => {
-        i++;
-        if (i >= lines.length) { clearInterval(iv); stepConcepts(text); return; }
-        word.textContent = lines[i][0];
-        line.innerHTML = lines[i][1] ? `<b>${esc(lines[i][1])}</b>` : "&nbsp;";
-        haptic(4);
-      }, 620);
+        if (++i >= lines.length) { clearInterval(iv); proofs(); return; }
+        $("#pl", stage).textContent = lines[i][0];
+        $("#ps", stage).textContent = lines[i][1];
+        haptic(3);
+      }, 560);
+      void ed0;
     }
 
-    /* ---- step 3 : pick a concept ----------------------------- */
-    function stepConcepts(text) {
-      picked = 0;
-      origSnapshot = null;      // fresh designs → drop any prior customisation snapshot
-      customTitle = null;
-      const draft = draftEvent(text);
+    /* 3 · three proofs and the studio */
+    function proofs() {
       stage.innerHTML = `
-        <div class="concepts">
-          <div class="create-body" style="padding-bottom:4px">
-            <h2 class="create-h">Here's what we made.</h2>
-            <p class="create-sub">Change everything or nothing. Three reads on your vibe — swipe, pick one.</p>
-          </div>
-          <div class="concept-strip" id="strip">
-            ${brief.concepts.map((c, i) => `
-              <button class="concept-card ${i === 0 ? "picked" : ""}" data-c="${i}">
-                <div class="concept-frame" data-frame="${i}"></div>
-                <div class="concept-label">
-                  <span class="tiername t-${c.tierName.toLowerCase()}">◆ ${c.tierName} · ${esc(c.pal.name)}</span>
-                  <span class="pickmark">${i === 0 ? "PICKED ✓" : "TAP TO PICK"}</span>
-                </div>
-              </button>`).join("")}
-          </div>
-          <div class="create-body" style="padding-top:2px">
-            <button class="btn btn-ember" id="use-btn">Use this one →</button>
-            <div class="spacer"></div>
-            <button class="btn btn-line" id="reroll-btn">↻ None of these — remix all three</button>
+        <div class="c-pad" style="padding-bottom:6px">
+          <span class="lab">Step 2 of 4 · Proofs</span>
+          <h2 class="c-h">Three proofs, <em>fresh off the press.</em></h2>
+          <p class="c-sub" style="margin-bottom:8px">Swipe through. Every word and every ink can be changed on the next page.</p>
+        </div>
+        <div class="proofs" id="proofs">
+          ${st.brief.proofs.map((p, i) => {
+            const ed = Editions.get(p.edition);
+            return `<button class="proof ${i === st.pick ? "on" : ""}" data-i="${i}">
+              <div class="frame" data-f="${i}"></div>
+              <div class="proof-cap"><b>${ed.name}</b><span class="lab">Nº ${ed.no}</span></div>
+              <p>${esc(Editions.inkOf(p).name)} · ${esc(ed.note)}</p>
+            </button>`;
+          }).join("")}
+          <div class="proof ${st.pick === 3 ? "on" : ""}" data-i="3" id="cm">${commissionCard()}</div>
+        </div>
+        <div class="c-pad" style="padding-top:8px">
+          <div class="stack">
+            <button class="btn" id="take">Take this proof <span class="arr">→</span></button>
+            <button class="btn btn-line" id="again">Pull three more</button>
           </div>
         </div>`;
+      st.brief.proofs.forEach((p, i) => Editions.mount($(`[data-f="${i}"]`, stage), draft(), p, { reveal: true }));
+      if (st.commission && st.commission.html) Editions.mount($("[data-cmf]", stage), draft(), st.commission);
 
-      // mount scaled invite previews
-      brief.concepts.forEach((c, i) => {
-        const frame = $(`[data-frame="${i}"]`, stage);
-        const inv = Templates.render(draft, c);
-        frame.appendChild(inv);
-        requestAnimationFrame(() => {
-          const s = frame.clientWidth / 340;
-          inv.style.transform = `scale(${s})`;
+      $("#proofs", stage).onclick = e => {
+        if (e.target.closest("#commission")) { commission(); return; }
+        const card = e.target.closest(".proof"); if (!card) return;
+        const i = +card.dataset.i;
+        if (i === 3 && !(st.commission && st.commission.html)) return;
+        st.pick = i;
+        $$(".proof", stage).forEach(el => el.classList.toggle("on", +el.dataset.i === i));
+        haptic(5);
+      };
+      $("#take", stage).onclick = () => {
+        st.concept = st.pick === 3 ? Object.assign({}, st.commission) : Object.assign({}, st.brief.proofs[st.pick]);
+        if (st.concept.edition !== "commission") S.profile.picks[st.concept.edition] = (S.profile.picks[st.concept.edition] || 0) + 1;
+        Store.save(); haptic(10);
+        proofDesk();
+      };
+      $("#again", stage).onclick = () => { st.reroll += 1; haptic(6); press(); };
+    }
+
+    function commissionCard() {
+      if (st.commission && st.commission.html) return `
+        <div class="frame" data-cmf></div>
+        <div class="proof-cap"><b>Commission</b><span class="lab">One-off</span></div>
+        <p>Drawn for this brief alone by the studio.</p>`;
+      if (st.commission && st.commission.pending) return `
+        <div class="commission-cta"><div><span class="lab live">In the studio</span><b>Drawing your one-off…</b><p>Usually under a minute. You can keep browsing the proofs.</p></div></div>
+        <div class="proof-cap"><b>Commission</b><span class="lab">One-off</span></div>`;
+      return `
+        <div class="commission-cta"><div>
+          <span class="lab">The studio · Nº 00</span>
+          <b>Commission a one-off.</b>
+          <p>${AI.enabled ? "Claude draws a poster for this brief alone, not one of our six editions. It takes about a minute." : "Claude draws a poster for this brief alone. The studio opens once this copy of jalsa is connected to its cloud."}</p>
+          ${AI.enabled ? `<button class="btn btn-sm" id="commission" style="margin:0 auto">Commission it</button>` : `<span class="lab">Closed on this copy</span>`}
+          ${st.commission && st.commission.error ? `<p style="margin:14px 0 0;color:#e9a08f">${esc(st.commission.error)}</p>` : ""}
+        </div></div>
+        <div class="proof-cap"><b>Commission</b><span class="lab">One-off</span></div>`;
+    }
+
+    async function commission() {
+      haptic(10);
+      st.commission = { pending: true };
+      $("#cm", stage).innerHTML = commissionCard();
+      const d = draft();
+      try {
+        const html = await AI.generate({
+          prompt: st.text,
+          details: { title: d.title, host: d.hostName, date: Engine.longDate(d), time: Engine.formatTime(d.time), venue: "Venue to follow" },
         });
-      });
-
-      $("#strip", stage).onclick = e => {
-        const card = e.target.closest(".concept-card"); if (!card) return;
-        picked = +card.dataset.c;
-        $$(".concept-card", stage).forEach((el, i) => {
-          el.classList.toggle("picked", i === picked);
-          $(".pickmark", el).textContent = i === picked ? "PICKED ✓" : "TAP TO PICK";
-        });
-        haptic(8);
-      };
-      $("#use-btn", stage).onclick = () => {
-        S.profile.tierPicks[brief.concepts[picked].tier]++;
-        Store.save(); haptic(14);
-        stepCustomize(text);
-      };
-      $("#reroll-btn", stage).onclick = () => { reroll += 17; haptic(8); stepGenerate(text); };
+        st.commission = { edition: "commission", html, tagline: st.brief.proofs[0].tagline, fallback: st.brief.proofs[0].edition };
+        haptic([10, 40, 10]);
+        toast("Your commission is back from the studio.");
+      } catch (e) {
+        st.commission = { error: e.message || "The studio couldn't finish this one." };
+      }
+      const cm = $("#cm", stage);
+      if (!cm) return;   // they've moved on; the result waits for them
+      cm.innerHTML = commissionCard();
+      if (st.commission.html) Editions.mount($("[data-cmf]", cm), draft(), st.commission);
     }
 
-    function draftEvent(text) {
-      return {
-        title: brief.title, tagline: brief.concepts[0].tagline, typeKey: brief.typeKey,
-        glyph: brief.glyph, date: Store.dayOffset(7).date, time: brief.timeHint === "AM" ? "11:00" : brief.timeHint === "SUNSET" ? "17:30" : brief.timeHint === "LATE" ? "21:30" : "19:30",
-        venue: "", desc: text,
-      };
-    }
-
-    /* ---- step 3.5 : make it yours (manual editor) ------------ */
-    function colourInput(key, label, val) {
-      const v = hex6(val);
-      return `<label class="swatch">
-        <input type="color" data-k="${key}" value="${v}">
-        <span class="sw-lab">${label}</span><span class="hex">${v.toUpperCase()}</span>
-      </label>`;
-    }
-
-    function stepCustomize(text) {
-      const c = brief.concepts[picked];        // edited in place
-      const d = draftEvent(text);
-      if (customTitle == null) customTitle = brief.title;
-      if (!origSnapshot) origSnapshot = JSON.parse(JSON.stringify({ pal: c.pal, tagline: c.tagline, title: brief.title, layout: c.layout }));
-
+    /* 4 · the proof desk */
+    function proofDesk() {
+      const c = st.concept;
+      const isCm = c.edition === "commission";
+      const ed = isCm ? null : Editions.get(c.edition);
       stage.innerHTML = `
-        <div class="create-body" style="padding-bottom:4px">
-          <h2 class="create-h">Make it <span style="color:var(--ember)">yours</span>.</h2>
-          <p class="create-sub">Edit the words, tune the colours, or drop an inspo pic and we'll pull a palette from it.</p>
-        </div>
-        <div class="editor">
-          <div class="editor-preview"><div class="ed-frame" id="ed-frame"></div></div>
-          <div class="editor-controls">
-            <div class="field"><label>Title</label><input id="ed-title" maxlength="40" value="${esc(customTitle)}"></div>
-            <div class="field"><label>Tagline</label><input id="ed-tag" maxlength="60" value="${esc(c.tagline)}"></div>
-            <div class="section-label">Colours</div>
-            <div class="swatch-row" id="ed-colours">
-              ${colourInput("bg", "Background", c.pal.bg)}
-              ${colourInput("ink", "Text", c.pal.ink)}
-              ${colourInput("a", "Accent", c.pal.a)}
-              ${colourInput("pop", "Highlight", c.pal.pop || c.pal.a)}
-            </div>
-            <div class="section-label">Your photo</div>
-            <label class="inspo-drop">
-              <input type="file" id="ed-photo-file" accept="image/*" hidden>
-              <span id="ed-photo-label">${customPhoto ? "✓ Photo added — tap to change" : "＋ Add a photo to feature in the invite"}</span>
-            </label>
-            <button class="btn ${c.layout === "photo" ? "btn-ember" : "btn-ghost"}" id="photo-style" style="margin-top:10px">${c.layout === "photo" ? "✓ Photo-poster style — tap to remove" : "Switch to photo-poster layout"}</button>
-            <div class="section-label">Inspiration</div>
-            <label class="inspo-drop">
-              <input type="file" id="inspo-file" accept="image/*" hidden>
-              <span id="inspo-label">＋ Add an inspo picture — we'll suggest a palette</span>
-            </label>
-            <div class="inspo-suggest" id="inspo-suggest" hidden></div>
+        <div class="c-pad proofdesk">
+          <div>
+            <span class="lab">Step 3 of 4 · Corrections</span>
+            <h2 class="c-h" style="margin-bottom:0">Mark up <em>the proof.</em></h2>
           </div>
-        </div>
-        <div class="create-body" style="padding-top:0">
-          <button class="btn btn-ember" id="ed-next">Next — the details →</button>
-          <div class="spacer"></div>
-          <button class="btn btn-line" id="ed-reset">↺ Back to the original design</button>
+          <div class="viewer-card" id="pv"></div>
+          ${isCm ? `<p class="c-sub" style="margin:0">A commission is drawn as one piece, so its words are set by the studio. Change the brief and commission again if you'd like different wording.</p>` : `
+          <label class="field"><span class="lab">Title</span><input id="t" maxlength="40" value="${esc(st.title)}"></label>
+          <label class="field"><span class="lab">The line beneath</span><input id="g" maxlength="70" value="${esc(c.tagline)}"></label>
+          <div><span class="lab" style="display:block;margin-bottom:10px">Edition</span>
+            <div class="eds" id="eds">${Editions.LIST.map(k => `<button class="ed-pick ${k === c.edition ? "on" : ""}" data-ed="${k}"><span data-edp="${k}"></span>${Editions.get(k).name}</button>`).join("")}</div>
+          </div>
+          <div><span class="lab" style="display:block;margin-bottom:10px">Ink · ${esc(ed.name)}</span>
+            <div class="inks" id="inks">${Object.entries(ed.inks).map(([k, v]) => `<button class="ink ${k === c.ink ? "on" : ""}" data-ink="${k}"><i style="background:linear-gradient(135deg, ${v.p} 50%, ${v.a || v.i} 50%)"></i>${esc(v.name)}</button>`).join("")}</div>
+          </div>`}
+          <label class="upload">
+            <input type="file" id="ph" accept="image/*" hidden>
+            <span>${st.photo ? "<b>Photograph added.</b> Tap to change it." : `<b>Add a photograph</b> ${isCm ? "for the studio's frame" : "· it sets the card as a Snapshot"}`}</span>
+            ${st.photo ? `<img src="${st.photo}" alt="">` : `<span class="lab">Optional</span>`}
+          </label>
+          <button class="btn" id="next">The particulars <span class="arr">→</span></button>
         </div>`;
 
-      const frame = $("#ed-frame", stage);
-      function repaint() {
-        frame.innerHTML = "";
-        const isPhoto = c.layout === "photo";
-        const preview = Object.assign({}, d, {
-          title: isPhoto ? (customTitle || "Your Jalsa") : ((customTitle || "").toUpperCase() || "YOUR JALSA"),
-          photo: customPhoto,
-        });
-        const inv = Templates.render(preview, c);
-        frame.appendChild(inv);
-        requestAnimationFrame(() => { inv.style.transform = `scale(${frame.clientWidth / 340})`; });
-      }
-      repaint();
-
-      function isDark(hex) { const [r, g, b] = hexRgb(hex); return (.2126 * r + .7152 * g + .0722 * b) < 130; }
-      function setPhotoLayout() {
-        c.layout = "photo";
-        if (isDark(c.pal.bg)) c.pal = Object.assign({}, c.pal, { bg: "#F3ECE1", ink: "#2A1410", a: "#C0271F" });
-      }
-      const photoFile = $("#ed-photo-file", stage);
-      photoFile.onchange = () => {
-        const f = photoFile.files && photoFile.files[0]; if (!f) return;
-        $("#ed-photo-label", stage).textContent = "Adding photo…";
-        compressPhoto(f).then(url => {
-          customPhoto = url;
-          if (c.layout !== "photo") setPhotoLayout();
-          haptic(12); stepCustomize(text);
-        }).catch(() => { $("#ed-photo-label", stage).textContent = "Couldn't load that image — try another"; });
-      };
-      $("#photo-style", stage).onclick = () => {
-        if (c.layout === "photo") c.layout = origSnapshot.layout;
-        else setPhotoLayout();
-        haptic(10); stepCustomize(text);
-      };
-
-      $("#ed-title", stage).oninput = e => { customTitle = e.target.value; repaint(); };
-      $("#ed-tag", stage).oninput = e => { c.tagline = e.target.value; repaint(); };
-      $("#ed-colours", stage).oninput = e => {
-        const key = e.target.dataset.k; if (!key) return;
-        c.pal[key] = e.target.value;
-        const lab = e.target.parentElement.querySelector(".hex"); if (lab) lab.textContent = e.target.value.toUpperCase();
-        repaint();
-      };
-
-      function syncColourInputs() {
-        [["bg", c.pal.bg], ["ink", c.pal.ink], ["a", c.pal.a], ["pop", c.pal.pop]].forEach(([k, v]) => {
-          const inp = stage.querySelector(`input[data-k="${k}"]`);
-          if (inp) { inp.value = hex6(v); const lab = inp.parentElement.querySelector(".hex"); if (lab) lab.textContent = hex6(v).toUpperCase(); }
-        });
-      }
-
-      const fileIn = $("#inspo-file", stage);
-      fileIn.onchange = () => {
-        const f = fileIn.files && fileIn.files[0]; if (!f) return;
-        $("#inspo-label", stage).textContent = "Reading colours…";
-        extractPalette(f).then(cols => {
-          const [bg, ink, a, pop] = mapInspo(cols);
-          const box = $("#inspo-suggest", stage); box.hidden = false;
-          box.innerHTML = `
-            <div class="inspo-swatches">${cols.map(h => `<span style="background:${h}"></span>`).join("")}</div>
-            <p class="inspo-note">Pulled from your pic — a <b style="color:${a}">${a.toUpperCase()}</b> accent over <b>${bg.toUpperCase()}</b>.</p>
-            <button class="btn btn-ghost" id="inspo-apply">Apply this palette →</button>`;
-          $("#inspo-label", stage).textContent = "✓ Palette ready below";
-          $("#inspo-apply", stage).onclick = () => {
-            c.pal.bg = bg; c.pal.ink = ink; c.pal.a = a; c.pal.pop = pop;
-            syncColourInputs(); repaint(); haptic(14);
-            toast("Palette applied from your inspo pic.");
-          };
-        }).catch(() => { $("#inspo-label", stage).textContent = "Couldn't read that image — try another"; });
-      };
-
-      $("#ed-next", stage).onclick = () => { haptic(12); stepDetails(text); };
-      $("#ed-reset", stage).onclick = () => {
-        c.pal = JSON.parse(JSON.stringify(origSnapshot.pal));
-        c.tagline = origSnapshot.tagline;
-        customTitle = origSnapshot.title;
-        haptic(8); stepCustomize(text);
-      };
-    }
-
-    /* pull a small dominant-colour palette out of an uploaded image */
-    function extractPalette(file) {
-      return new Promise((resolve, reject) => {
-        const img = new Image();
-        img.onload = () => {
-          try {
-            const cv = document.createElement("canvas");
-            const w = cv.width = 64, h = cv.height = 64;
-            const ctx = cv.getContext("2d");
-            ctx.drawImage(img, 0, 0, w, h);
-            const data = ctx.getImageData(0, 0, w, h).data;
-            const buckets = {};
-            for (let i = 0; i < data.length; i += 4) {
-              if (data[i + 3] < 125) continue;
-              const key = (data[i] >> 5) + "," + (data[i + 1] >> 5) + "," + (data[i + 2] >> 5);
-              const bk = buckets[key] || (buckets[key] = { n: 0, r: 0, g: 0, b: 0 });
-              bk.n++; bk.r += data[i]; bk.g += data[i + 1]; bk.b += data[i + 2];
-            }
-            const top = Object.values(buckets).sort((a, b) => b.n - a.n).slice(0, 6)
-              .map(bk => rgbToHex(bk.r / bk.n, bk.g / bk.n, bk.b / bk.n));
-            URL.revokeObjectURL(img.src);
-            top.length ? resolve(top) : reject();
-          } catch (e) { reject(e); }
+      const pv = $("#pv", stage);
+      const paint = () => Editions.mount(pv, draft(), c);
+      paint();
+      if (!isCm) {
+        $$("[data-edp]", stage).forEach(s => Editions.mount(s, draft(), { edition: s.dataset.edp, tagline: c.tagline }));
+        $("#t", stage).oninput = e => { st.title = e.target.value; paint(); };
+        $("#g", stage).oninput = e => { c.tagline = e.target.value; paint(); };
+        $("#eds", stage).onclick = e => {
+          const b = e.target.closest("[data-ed]"); if (!b) return;
+          c.edition = b.dataset.ed; c.ink = Object.keys(Editions.get(c.edition).inks)[0];
+          haptic(5); proofDesk();
         };
-        img.onerror = reject;
-        img.src = URL.createObjectURL(file);
-      });
+        $("#inks", stage).onclick = e => {
+          const b = e.target.closest("[data-ink]"); if (!b) return;
+          c.ink = b.dataset.ink;
+          $$(".ink", stage).forEach(x => x.classList.toggle("on", x === b));
+          haptic(4); paint();
+        };
+      }
+      $("#ph", stage).onchange = async e => {
+        const f = e.target.files && e.target.files[0]; if (!f) return;
+        st.photo = await compress(f, 720, .8);
+        if (st.photo && !isCm && c.edition !== "snapshot") { c.edition = "snapshot"; c.ink = "tomato"; }
+        haptic(8); proofDesk();
+      };
+      $("#next", stage).onclick = () => { haptic(8); particulars(); };
     }
 
-    /* map extracted colours to bg / ink / accent / pop, kept legible & dark */
-    function mapInspo(cols) {
-      const rgb = hexRgb, lum = h => { const [r, g, b] = rgb(h); return .2126 * r + .7152 * g + .0722 * b; };
-      const sat = h => { const [r, g, b] = rgb(h); const mx = Math.max(r, g, b), mn = Math.min(r, g, b); return mx ? (mx - mn) / mx : 0; };
-      const byLum = [...cols].sort((a, b) => lum(a) - lum(b));
-      const bySat = [...cols].sort((a, b) => sat(b) - sat(a));
-      let bg = byLum[0];
-      if (lum(bg) > 120) { const [r, g, b] = rgb(bg); bg = rgbToHex(r * .32, g * .32, b * .34); }  // force a dark canvas
-      const light = byLum[byLum.length - 1];
-      const ink = lum(light) > 190 ? light : "#FAF8F3";
-      const a = bySat[0] || ink;
-      const pop = bySat[1] || a;
-      return [bg, ink, a, pop];
-    }
-
-    function hexRgb(h) { const n = parseInt(hex6(h).slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
-    function rgbToHex(r, g, b) { return "#" + [r, g, b].map(x => Math.max(0, Math.min(255, Math.round(x))).toString(16).padStart(2, "0")).join(""); }
-    function hex6(v) {
-      v = String(v || "").trim();
-      if (/^#[0-9a-fA-F]{6}$/.test(v)) return v;
-      if (/^#[0-9a-fA-F]{3}$/.test(v)) return "#" + v.slice(1).split("").map(c => c + c).join("");
-      return "#141018";
-    }
-
-    /* ---- step 4 : details ------------------------------------ */
-    function stepDetails(text) {
-      const d = draftEvent(text);
-      const c = brief.concepts[picked];
+    /* 5 · the particulars */
+    function particulars() {
+      const d = draft();
       stage.innerHTML = `
-        <div class="create-body">
-          <h2 class="create-h">Lock the details.</h2>
-          <p class="create-sub">The design is done. Now the logistics — this is the part WhatsApp always loses.</p>
-          <div class="field"><label>Event name</label><input id="f-title" maxlength="40" value="${esc(customTitle || brief.title)}"></div>
-          <div class="fieldrow">
-            <div class="field"><label>Date</label><input id="f-date" type="date" value="${d.date}"></div>
-            <div class="field"><label>Time</label><input id="f-time" type="time" value="${d.time}"></div>
+        <div class="c-pad">
+          <span class="lab">Step 4 of 4 · Particulars</span>
+          <h2 class="c-h">The part WhatsApp <em>always loses.</em></h2>
+          <p class="c-sub">Date, place, numbers. Guests can tap any of it straight into their calendar or maps.</p>
+          <label class="field"><span class="lab">Title</span><input id="f-t" maxlength="40" value="${esc(d.title)}"></label>
+          <div class="field-row">
+            <label class="field"><span class="lab">Date</span><input id="f-d" type="date" value="${d.date}"></label>
+            <label class="field"><span class="lab">Time</span><input id="f-h" type="time" value="${d.time}"></label>
           </div>
-          <div class="field"><label>Where (venue / area)</label><input id="f-venue" maxlength="60" placeholder="Terrace, 4th Block Koramangala"></div>
-          <div class="fieldrow">
-            <div class="field"><label>Capacity (0 = open)</label><input id="f-cap" type="number" min="0" max="500" value="${brief.count || 0}"></div>
-            <div class="field"><label>₹ per head (0 = free)</label><input id="f-upi" type="number" min="0" max="99999" value="0"></div>
+          <label class="field"><span class="lab">Where</span><input id="f-v" maxlength="70" placeholder="The terrace, 4th Block, Koramangala"></label>
+          <div class="field-row">
+            <label class="field"><span class="lab">Places (0 = open)</span><input id="f-c" type="number" inputmode="numeric" min="0" max="500" value="${st.brief.count || 0}"></label>
+            <label class="field"><span class="lab">₹ a head (0 = free)</span><input id="f-u" type="number" inputmode="numeric" min="0" max="99999" value="0"></label>
           </div>
-          <div class="field" id="upi-id-wrap" style="display:none"><label>Your UPI ID (money lands here)</label><input id="f-upiid" placeholder="yourname@oksbi"></div>
-          <div class="section-label" style="margin:4px 0 10px">Who's it for?</div>
-          <div class="aud-toggle" id="aud-toggle">
-            <button class="aud-opt ${audience.mode === "all" ? "on" : ""}" data-m="all"><b>Everyone</b><span>your whole circle sees it</span></button>
-            <button class="aud-opt ${audience.mode === "some" ? "on" : ""}" data-m="some"><b>Chosen ones</b><span>only people you pick</span></button>
-          </div>
-          <div class="aud-people" id="aud-people" ${audience.mode === "some" ? "" : "hidden"}>
-            ${Store.FRIENDS.map(f => `<button class="aud-chip ${audience.names.includes(f.name) ? "on" : ""}" data-n="${esc(f.name)}"><i style="background:hsl(${f.hue} 70% 55%)"></i>${esc(f.name)}</button>`).join("")}
-          </div>
-          <button class="btn btn-ember" id="pub-btn">Publish the jalsa ✦</button>
+          <label class="field" id="upi-wrap" hidden><span class="lab">Your UPI ID · money lands here</span><input id="f-ui" maxlength="50" placeholder="yourname@okhdfcbank"></label>
+          <button class="btn" id="print">Print and send <span class="arr">→</span></button>
         </div>`;
-      const upiIn = $("#f-upi", stage);
-      upiIn.oninput = () => { $("#upi-id-wrap", stage).style.display = +upiIn.value > 0 ? "block" : "none"; };
-      $("#aud-toggle", stage).onclick = e => {
-        const b = e.target.closest("[data-m]"); if (!b) return;
-        audience.mode = b.dataset.m;
-        $$(".aud-opt", stage).forEach(el => el.classList.toggle("on", el.dataset.m === audience.mode));
-        $("#aud-people", stage).hidden = audience.mode !== "some";
-        haptic(6);
-      };
-      $("#aud-people", stage).onclick = e => {
-        const b = e.target.closest("[data-n]"); if (!b) return;
-        const n = b.dataset.n, i = audience.names.indexOf(n);
-        if (i >= 0) audience.names.splice(i, 1); else audience.names.push(n);
-        b.classList.toggle("on"); haptic(5);
-      };
-      $("#pub-btn", stage).onclick = () => {
-        const title = $("#f-title", stage).value.trim() || customTitle || brief.title;
+      $("#f-u", stage).oninput = e => { $("#upi-wrap", stage).hidden = !(+e.target.value > 0); };
+      $("#print", stage).onclick = async () => {
+        const title = $("#f-t", stage).value.trim() || d.title;
+        const concept = Object.assign({}, st.concept);
+        if (concept.edition !== "commission") delete concept.html;
         const ev = {
-          id: Store.uid(), slug: Store.slugify(title),
-          title: title.toUpperCase(), tagline: c.tagline, typeKey: brief.typeKey, glyph: brief.glyph,
-          concept: c, date: $("#f-date", stage).value, time: $("#f-time", stage).value || "19:30",
-          venue: $("#f-venue", stage).value.trim(), capacity: +$("#f-cap", stage).value || 0,
-          upiAmount: +upiIn.value || 0, upiId: ($("#f-upiid", stage)?.value || "").trim(),
-          hostName: S.profile.name || "You", isMine: true,
-          photo: customPhoto || null,
-          audience: audience.mode === "some" ? { mode: "some", names: [...audience.names] } : { mode: "all" },
+          id: Store.uid(), slug: Store.slugify(title), title,
+          tagline: concept.tagline, typeKey: st.brief.typeKey, concept,
+          date: $("#f-d", stage).value, time: $("#f-h", stage).value || "19:30",
+          venue: $("#f-v", stage).value.trim(), capacity: +$("#f-c", stage).value || 0,
+          upiAmount: +$("#f-u", stage).value || 0, upiId: $("#f-ui", stage).value.trim(),
+          hostName: S.profile.name, isMine: true, photo: st.photo,
           rsvps: [], updates: [], photos: [], createdAt: Date.now(),
         };
+        const btn = $("#print", stage);
+        btn.disabled = true; btn.textContent = "At the press…";
+        if (Cloud.enabled) ev.cloudOk = !!(await Cloud.publish(ev));
+        if (ev.cloudOk) ev.cloudId = ev.slug;
         S.events.unshift(ev);
-        S.myRsvps[ev.id] = "yes";
-        Store.addPulse(`<b>You</b> dropped a new event — <b>${esc(ev.title)}</b>`);
+        Store.note(`<b>You</b> sent out <i>${esc(ev.title)}</i>`);
         Store.save();
-        haptic([20, 50, 20, 50, 40]);
-        scheduleFriendRsvps(ev);
-        stepPublished(ev);
+        haptic([14, 40, 14, 40, 30]);
+        sent(ev);
       };
     }
 
-    /* ---- step 5 : published ---------------------------------- */
-    function stepPublished(ev) {
-      const share = Engine.shareText(ev, S.profile.name, inviteURL(ev));
+    /* 6 · sent */
+    function sent(ev) {
+      const text = Engine.shareText(ev, linkFor(ev));
       stage.innerHTML = `
-        <div class="pub-hero">
-          <div class="big">It's live. 🔥</div>
-          <p>The invite is out there being gorgeous. Every share on WhatsApp is the event starting early.</p>
-        </div>
-        <div class="sharecard">${esc(share).replace(/\*([^*]+)\*/g, "<b>$1</b>")}</div>
-        <div class="create-body" style="padding-top:0">
-          <button class="btn btn-ember" id="wa-btn">Share on WhatsApp</button>
-          <div class="spacer"></div>
-          <div class="actrow">
-            <button class="btn btn-ghost" id="view-btn">See the invite</button>
-            <button class="btn btn-ghost" id="copy-btn">Copy text</button>
+        <div class="sent">
+          <span class="lab">Printed · ${esc(new Date().toLocaleDateString("en-IN", { day: "numeric", month: "long" }))}</span>
+          <div class="viewer-card" id="sv" style="margin-top:22px"></div>
+          <h2>It's ready to send.</h2>
+          <p>Guests open the link, see this card arrive in an envelope, and reply in one tap. No app, no sign-up.</p>
+          <div class="msg">${esc(text).replace(/\*([^*]+)\*/g, "<b>$1</b>")}</div>
+          <div class="stack" style="text-align:left">
+            <button class="btn" id="wa">Send on WhatsApp</button>
+            <div class="btn-row">
+              <button class="btn btn-line" id="cp">Copy the link</button>
+              <button class="btn btn-line" id="rg">The register</button>
+            </div>
+            ${Cloud.enabled && !ev.cloudOk ? `<p class="prose" style="margin:6px 0 0">The cloud didn't answer, so this link carries the whole invitation itself. Replies will reach you once it's back.</p>` : ""}
+            ${!Cloud.enabled ? `<p class="prose" style="margin:6px 0 0">This copy of jalsa isn't connected to a cloud, so the link carries the invitation itself. Open it in another tab to see the guest side.</p>` : ""}
           </div>
         </div>`;
-      const heroEl = $(".pub-hero .big", stage);
-      burst(heroEl, 18);
-      $("#wa-btn", stage).onclick = () => shareEvent(ev);
-      $("#copy-btn", stage).onclick = () => { navigator.clipboard?.writeText(share); toast("Copied. Go cause a stir."); haptic(8); };
-      $("#view-btn", stage).onclick = () => { closeOverlay(ov); openInvite(ev.id); };
+      Editions.mount($("#sv", stage), ev, ev.concept, { reveal: true });
+      $("#wa", stage).onclick = () => shareEvent(ev);
+      $("#cp", stage).onclick = () => { navigator.clipboard?.writeText(linkFor(ev)).then(() => toast("Link copied.")).catch(() => toast(linkFor(ev))); };
+      $("#rg", stage).onclick = () => closeSheet(sh, () => { nav("upcoming"); openRegister(ev.id); });
     }
   }
 
-  function tasteTier() {
-    const p = S.profile.tierPicks || { 1: 0, 2: 0, 3: 0 };
-    let best = 0, bestT = null;
-    for (const t of [1, 2, 3]) if (p[t] > best) { best = p[t]; bestT = t; }
-    if (bestT) return bestT;
-    const v = S.profile.vibes || [];
-    if (v.includes("chaos") || v.includes("afterdark")) return 3;
-    if (v.includes("soft")) return 1;
-    return null;
-  }
-
-  /* ---- simulated circle: friends respond to your event ------- */
-  function scheduleFriendRsvps(ev) {
-    let pool = [...Store.FRIENDS];
-    if (ev.audience && ev.audience.mode === "some") {
-      pool = pool.filter(f => ev.audience.names.includes(f.name));   // only the chosen ones see it
-    }
-    pool = pool.sort(() => Math.random() - .5);
-    if (!(ev.audience && ev.audience.mode === "some")) pool = pool.slice(0, 5 + Math.floor(Math.random() * 4));
-    pool.forEach((f, i) => {
-      setTimeout(() => {
-        const cur = Store.ev(ev.id);
-        if (!cur) return;
-        if (cur.capacity && cur.rsvps.filter(r => r.status === "yes").length + 1 >= cur.capacity) return;
-        const status = Math.random() < .78 ? "yes" : "maybe";
-        cur.rsvps.push({ name: f.name, hue: f.hue, status, paid: false });
-        Store.addPulse(`<b>${f.name}</b> said ${status === "yes" ? "haan ✓" : "shayad…"} to <b>${esc(cur.title)}</b>`);
-        Store.save();
-        haptic(6);
-        toast(`${f.name} ${status === "yes" ? "is IN — haan aaunga (actually confirmed)" : 'said "maybe". Classic.'}`, 2200);
-        if (!overlayRoot.children.length) nav(currentNav);
-      }, 6000 + i * (7000 + Math.random() * 9000));
-    });
-  }
-
-  /* ============================================================
-     HOST DESK
-     ============================================================ */
-  function openHost(id) {
-    const ev = Store.ev(id);
-    if (!ev) return;
-    const yes = ev.rsvps.filter(r => r.status === "yes");
-    const maybe = ev.rsvps.filter(r => r.status === "maybe");
-    const no = ev.rsvps.filter(r => r.status === "no");
-    const collected = ev.rsvps.filter(r => r.paid).length * (ev.upiAmount || 0);
-
-    const ov = openOverlay(`
-      <div class="ov-top">${backBtn}<span class="ov-title">Host Desk</span>
-        <button class="icon-btn" data-share><svg viewBox="0 0 24 24"><path d="M12 15V4m0 0L8 8m4-4 4 4"/><path d="M5 13v6a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-6"/></svg></button>
-      </div>
-      <div class="ov-scroll"><div class="pagepad">
-        <h2 class="create-h" style="margin-bottom:2px">${esc(ev.title)}</h2>
-        <p class="create-sub" style="margin-bottom:16px">${whenLine(ev)} · ${esc(ev.venue || "venue TBD")}</p>
-
-        <div class="stat-grid">
-          <div class="stat hot"><div class="n">${yes.length + (S.myRsvps[ev.id] === "yes" ? 1 : 0)}</div><div class="l">Going</div></div>
-          <div class="stat gold"><div class="n">${maybe.length}</div><div class="l">Maybe</div></div>
-          <div class="stat"><div class="n">${no.length}</div><div class="l">Out</div></div>
-          <div class="stat gold"><div class="n">${ev.upiAmount ? "₹" + collected : "—"}</div><div class="l">Collected</div></div>
-        </div>
-        ${ev.capacity ? `
-          <div class="capbar"><i style="width:${Math.min(100, (goingCount(ev) / ev.capacity) * 100)}%"></i></div>
-          <div class="caplab">${goingCount(ev)} / ${ev.capacity} — ${goingCount(ev) >= ev.capacity ? "FULL HOUSE. WAITLIST ACTIVE." : (ev.capacity - goingCount(ev)) + " SPOTS LEFT"}</div>` : ""}
-
-        <div class="section-label">Broadcast an update</div>
-        <div class="field"><textarea id="bc-text" rows="2" placeholder="Venue changed / bring ice / gate code is…"></textarea></div>
-        <button class="btn btn-ghost" id="bc-btn">Send to everyone — one message, zero group chat</button>
-        ${ev.updates.map(u => `<div class="updatecard" style="margin-top:10px">${esc(u.text)}<div class="when">${timeAgo(u.at)} · delivered to ${yes.length + maybe.length} people</div></div>`).join("")}
-
-        <div class="section-label">Guest list</div>
-        ${ev.rsvps.length === 0 ? `<p class="create-sub">Nobody yet. Share the link — the invite does the convincing.</p>` : ""}
-        <div id="guestlist">
-        ${ev.rsvps.map((r, i) => `
-          <div class="guestrow">
-            <div class="av" style="background:hsl(${r.hue} 62% 46%);margin:0">${esc(r.name[0])}</div>
-            <div style="flex:1">
-              <div class="gname">${esc(r.name)}</div>
-              <div class="gsub">${r.status === "maybe" ? `said "maybe" — nudge gently` : r.status === "yes" ? "confirmed" : "declined"}</div>
-            </div>
-            <span class="pill pill-${r.status}">${r.status}</span>
-            ${ev.upiAmount ? `<button class="paytog ${r.paid ? "paid" : ""}" data-pi="${i}">${r.paid ? "PAID ✓" : "₹ DUE"}</button>` : ""}
-          </div>`).join("")}
-        </div>
-
-        ${maybe.length ? `<div class="spacer"></div><button class="btn btn-line" id="nudge-btn">Nudge the ${maybe.length} "maybe" people (gently…)</button>` : ""}
-        <div class="spacer"></div>
-        ${ev.upiAmount ? `<button class="btn btn-line" id="collect-btn">Remind unpaid — "the venue doesn't accept vibes"</button>` : ""}
-      </div></div>`);
-
-    ov.onclick = e => {
-      if (e.target.closest("[data-close]")) { closeOverlay(ov); refreshCurrent(); return; }
-      if (e.target.closest("[data-share]")) { shareEvent(ev); return; }
-      const pt = e.target.closest("[data-pi]");
-      if (pt) {
-        const r = ev.rsvps[+pt.dataset.pi];
-        r.paid = !r.paid; Store.save(); haptic(8);
-        pt.classList.toggle("paid", r.paid);
-        pt.textContent = r.paid ? "PAID ✓" : "₹ DUE";
-        return;
-      }
-      if (e.target.closest("#bc-btn")) {
-        const t = $("#bc-text", ov).value.trim();
-        if (!t) { toast("Type something first. Even hosts need words."); return; }
-        ev.updates.unshift({ text: t, at: Date.now() });
-        Store.addPulse(`<b>You</b> sent an update to <b>${esc(ev.title)}</b>: “${esc(t.slice(0, 42))}${t.length > 42 ? "…" : ""}”`);
-        Store.save(); haptic([10, 30, 10]);
-        closeOverlay(ov); openHost(id);
-        toast(`Update pushed to ${yes.length + maybe.length} people. No group chat harmed.`);
-        return;
-      }
-      if (e.target.closest("#nudge-btn")) {
-        const names = maybe.map(m => m.name).join(", ");
-        const msg = `Arre ${names} — "${ev.title}" is on ${whenLine(ev)}. Maybe se haan kar do? RSVP: ${inviteURL(ev)}`;
-        navigator.clipboard?.writeText(msg);
-        window.open("https://wa.me/?text=" + encodeURIComponent(msg), "_blank");
-        toast("Nudge composed. Diplomacy included free.");
-        return;
-      }
-      if (e.target.closest("#collect-btn")) {
-        const unpaid = ev.rsvps.filter(r => r.status === "yes" && !r.paid).map(r => r.name);
-        if (!unpaid.length) { toast("Everyone's paid. A historic first."); return; }
-        const msg = `${unpaid.join(", ")} — ₹${ev.upiAmount} for "${ev.title}" please 🙏 The venue does not accept vibes as payment. Pay: ${inviteURL(ev)}`;
-        navigator.clipboard?.writeText(msg);
-        window.open("https://wa.me/?text=" + encodeURIComponent(msg), "_blank");
-        toast(`Reminder ready for ${unpaid.length} defaulters.`);
-        return;
-      }
-    };
-  }
-
-  /* ============================================================
-     MEMORIES (Rewind)
-     ============================================================ */
-  function renderMemories() {
-    const past = Store.past();
-    setScreen(`
-      <div class="apphead">
-        <div><h1>Rewind</h1><div class="sub">every jalsa gets a permanent home</div></div>
-        <div class="wordmark">JALSA<span class="dev">जलसा</span></div>
-      </div>
-      <div class="memgrid">
-        ${past.length ? past.map(ev => {
-          const p = ev.concept.pal;
-          return `
-          <button class="memcard" data-album="${ev.id}" style="${Templates.heroStyle(ev.concept)}">
-            <div class="shade"></div>
-            <div class="mtitle" style="${Templates.heroTitleStyle(ev.concept)};font-size:24px">${esc(ev.title)}</div>
-            <div class="msub">${Templates.fmtDate(ev)} · ${ev.photos.length} MEMORIES · ${ev.rsvps.filter(r => r.status === "yes").length} WERE THERE</div>
-          </button>`;
-        }).join("") : `
-        <div class="empty">
-          <div class="big">No memories yet.</div>
-          <p>That's what happens when the jalsa hasn't happened. Host one — this page fills itself.</p>
-        </div>`}
-      </div>`);
-    screen.onclick = e => {
-      const a = e.target.closest("[data-album]");
-      if (a) openAlbum(a.dataset.album);
-    };
-  }
-
-  function openAlbum(id) {
-    const ev = Store.ev(id);
-    if (!ev) return;
-    const ov = openOverlay(`
-      <div class="ov-top">${backBtn}<span class="ov-title">Memory Album</span>
-        <button class="icon-btn" id="reel-btn" title="Play memory reel"><svg viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z"/></svg></button>
-      </div>
-      <div class="ov-scroll">
-        <div class="pagepad" style="padding-top:4px">
-          <h2 class="create-h" style="margin-bottom:2px">${esc(ev.title)}</h2>
-          <p class="create-sub">${Templates.fmtDate(ev)} · that's a wrap. this one's going to age well.</p>
-        </div>
-        <div class="album-grid" id="ag">
-          ${ev.photos.map((p, i) => albumCell(p, i)).join("")}
-          <label class="album-add" for="photo-in">
-            <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>ADD YOURS
-          </label>
-        </div>
-        <input type="file" id="photo-in" accept="image/*" multiple style="display:none">
-        <div class="pagepad" style="padding-top:18px">
-          <button class="btn btn-line" id="inv-again">View the original invite</button>
-        </div>
-      </div>`);
-
-    function albumCell(p, i) {
-      if (p.type === "img") return `<div class="album-ph" style="--i:${i}"><img src="${p.src}" alt="memory"></div>`;
-      return `<div class="album-ph" style="--i:${i};background:
-        radial-gradient(120% 120% at 30% 20%, hsl(${p.h} 70% 55% / .9), hsl(${(p.h + 60) % 360} 65% 30%))"></div>`;
-    }
-
-    $("#photo-in", ov).onchange = async e => {
-      const files = [...e.target.files].slice(0, 12);
-      for (const f of files) {
-        const src = await compressImage(f);
-        if (src) ev.photos.push({ type: "img", src });
-      }
-      Store.save();
-      Store.addPulse(`<b>You</b> added ${files.length} photo${files.length > 1 ? "s" : ""} to <b>${esc(ev.title)}</b>`);
-      haptic(12);
-      toast("Saved to the album. Memory secured.");
-      closeOverlay(ov); openAlbum(id);
-    };
-    $("#reel-btn", ov).onclick = () => playReel(ev);
-    $("#inv-again", ov).onclick = () => { closeOverlay(ov); openInvite(ev.id, { reveal: true }); };
-    ov.addEventListener("click", e => { if (e.target.closest("[data-close]")) closeOverlay(ov); });
-  }
-
-  function compressImage(file) {
+  function compress(file, max = 900, q = .78) {
     return new Promise(res => {
       const img = new Image();
       img.onload = () => {
-        const max = 900, s = Math.min(1, max / Math.max(img.width, img.height));
+        const s = Math.min(1, max / Math.max(img.width, img.height));
         const cv = document.createElement("canvas");
-        cv.width = img.width * s; cv.height = img.height * s;
+        cv.width = Math.round(img.width * s); cv.height = Math.round(img.height * s);
         cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
-        res(cv.toDataURL("image/jpeg", .78));
         URL.revokeObjectURL(img.src);
+        res(cv.toDataURL("image/jpeg", q));
       };
       img.onerror = () => res(null);
       img.src = URL.createObjectURL(file);
     });
   }
 
-  function playReel(ev) {
-    if (!ev.photos.length) { toast("No photos yet. The reel needs raw material."); return; }
-    const caps = [ev.tagline, "that's a wrap.", `${ev.rsvps.filter(r => r.status === "yes").length} people. one night.`, "this one's going to age well.", ev.title.toLowerCase()];
-    const reel = document.createElement("div");
-    reel.className = "reel";
-    overlayRoot.appendChild(reel);
-    let i = 0;
-    function frame() {
-      const p = ev.photos[i % ev.photos.length];
-      reel.innerHTML = `
-        <div class="frame">${p.type === "img"
-          ? `<img src="${p.src}">`
-          : `<div class="huefill" style="background:radial-gradient(120% 120% at 30% 20%, hsl(${p.h} 70% 50%), hsl(${(p.h + 70) % 360} 65% 22%))"></div>`}
+  /* ============================================================
+     THE REGISTER — who's coming, live
+     ============================================================ */
+  function openRegister(id) {
+    const ev = Store.ev(id);
+    if (!ev) return;
+    const sh = openSheet("The register", `<div class="c-pad" id="reg"></div>`, {
+      tools: `<button class="textbtn" data-share>Send</button>`,
+    });
+    const root = $("#reg", sh);
+
+    function paint() {
+      const all = replies(ev);
+      const c = counts(ev);
+      const collected = all.filter(r => r.paid).length * (ev.upiAmount || 0);
+      const maybes = all.filter(r => r.status === "maybe");
+      root.innerHTML = `
+        <span class="lab">${esc(when(ev))}</span>
+        <h2 class="c-h" style="margin:8px 0 4px">${esc(ev.title)}</h2>
+        <p class="c-sub" style="margin:0">${esc(ev.venue || "Venue to follow")}</p>
+        <div class="tally">
+          <div><b>${c.yes}</b><span class="lab">Accepted</span></div>
+          <div><b>${c.maybe}</b><span class="lab">Pencilled</span></div>
+          <div><b>${c.no}</b><span class="lab">Regrets</span></div>
         </div>
-        <div class="rbrand">JALSA · MEMORY REEL</div>
-        <div class="rcap">${esc(caps[i % caps.length])}</div>`;
-      i++;
+        ${ev.capacity ? `<div class="cap"><i style="width:${Math.min(100, c.yes / ev.capacity * 100)}%"></i></div>
+          <p class="lab" style="margin-top:8px">${c.yes >= ev.capacity ? "Full house" : `${ev.capacity - c.yes} of ${ev.capacity} places left`}${ev.upiAmount ? ` · ₹${collected} collected` : ""}</p>` : ""}
+        <div class="section" style="margin:28px 0 0"><h2>Replies</h2>
+          <span class="lab ${Cloud.enabled && ev.cloudOk ? "live" : ""}">${Cloud.enabled && ev.cloudOk ? "Live" : "On this device"}</span></div>
+        <div class="reg">
+          ${all.length ? all.map((r, i) => `
+            <div class="reg-row">
+              <span class="n">${String(i + 1).padStart(2, "0")}</span>
+              <span><span class="nm">${esc(r.name)}</span><br><span class="src">${r.src === "link" ? "replied through the link" : "from your circle"}${r.at ? " · " + timeAgo(new Date(r.at).getTime()) : ""}</span></span>
+              ${stampHTML(r.status)}
+              ${ev.upiAmount && r.status === "yes" && r.src !== "link" ? `<button class="paid ${r.paid ? "on" : ""}" data-paid="${i}">${r.paid ? "Paid" : "Due"}</button>` : "<span></span>"}
+            </div>`).join("") : `<p class="prose" style="margin:16px 0">No replies yet. Send the link; the invitation does the persuading.</p>`}
+        </div>
+        <div class="stack" style="margin-top:22px">
+          <button class="btn" data-share>Send on WhatsApp</button>
+          <button class="btn btn-line" id="upd">Send everyone an update</button>
+          ${maybes.length ? `<button class="btn btn-line" id="nudge">Nudge the ${maybes.length} pencilled in</button>` : ""}
+          ${ev.upiAmount ? `<button class="btn btn-line" id="dues">Remind about the ₹${ev.upiAmount}</button>` : ""}
+        </div>`;
     }
+    paint();
+
+    async function pull() {
+      if (!(Cloud.enabled && ev.cloudOk)) return;
+      const rows = await Cloud.getRsvps(ev.slug);
+      if (JSON.stringify(rows) !== JSON.stringify(ev.cloudRsvps || [])) {
+        const before = (ev.cloudRsvps || []).length;
+        ev.cloudRsvps = rows; Store.save();
+        if (rows.length > before && before > 0) { haptic([8, 30, 8]); toast(`${rows[rows.length - 1].name} just replied.`); }
+        if (sh.isConnected) paint();
+      }
+    }
+    pull();
+    sh._poll = setInterval(pull, 8000);
+
+    const wa = msg => open("https://wa.me/?text=" + encodeURIComponent(msg), "_blank");
+    sh.addEventListener("click", e => {
+      if (e.target.closest("[data-share]")) { shareEvent(ev); return; }
+      const p = e.target.closest("[data-paid]");
+      if (p) { const r = ev.rsvps[+p.dataset.paid]; if (r) { r.paid = !r.paid; Store.save(); haptic(5); paint(); } return; }
+      if (e.target.closest("#upd")) wa(`An update on *${ev.title}*:\n\n`);
+      if (e.target.closest("#nudge")) wa(`A gentle nudge about *${ev.title}*, ${when(ev)}. Could you confirm when you get a moment?\n${linkFor(ev)}`);
+      if (e.target.closest("#dues")) wa(`For *${ev.title}*: ₹${ev.upiAmount} a head, whenever you can. You can pay from the invitation:\n${linkFor(ev)}`);
+    });
+  }
+
+  /* ============================================================
+     AROUND TOWN — public listings
+     ============================================================ */
+  const CATS = ["Everything", "Gigs", "Workshops", "Food", "Film", "Markets", "Open mic", "Art", "Wellness"];
+  let cat = "Everything";
+
+  function renderTown() {
+    const all = Store.town();
+    const list = cat === "Everything" ? all : all.filter(e => e.category === cat);
+    setScreen(`
+      <header class="mast">
+        <div class="mast-row">${WORDMARK}<span class="lab">Bengaluru</span></div>
+        <h1>Around town</h1>
+        <p>Public listings from venues this week, with a note when your circle's going.</p>
+      </header>
+      <div class="filters" id="cats">${CATS.map(c => `<button class="filter ${c === cat ? "on" : ""}" data-c="${c}">${c}</button>`).join("")}</div>
+      <div class="board">
+        ${list.map(ev => {
+          const st = S.townState[ev.id];
+          const cg = ev.circleGoing || [];
+          return `<button class="pin" data-open="${ev.id}">
+            <span data-thumb="${ev.id}"></span>
+            <h4>${esc(ev.title)}</h4>
+            <p>${esc(ev.venueName)} · ${esc(shortDate(ev))}</p>
+            <span class="lab ${cg.length ? "circle" : ""}">${st === "going" ? "You're going" : cg.length ? `${esc(cg[0].name)}${cg.length > 1 ? " +" + (cg.length - 1) : ""} going` : ev.priceFrom ? "₹" + ev.priceFrom : "Free"}</span>
+          </button>`;
+        }).join("") || `<p class="prose">Nothing under ${esc(cat)} this week.</p>`}
+      </div>`);
+    mountThumbs();
+    $("#cats").onclick = e => { const b = e.target.closest("[data-c]"); if (b) { cat = b.dataset.c; haptic(4); renderTown(); } };
+    screen.onclick = e => { const o = e.target.closest("[data-open]"); if (o) openInvite(o.dataset.open); };
+  }
+
+  function openListing(ev, reveal) {
+    const st = S.townState[ev.id];
+    const cg = ev.circleGoing || [];
+    const sh = openSheet(esc(ev.category), `
+      <div class="viewer-card" id="card"></div>
+      <div class="slip">
+        <h2>${esc(ev.title)}</h2>
+        <p class="by">${esc(ev.tagline)}</p>
+        ${factsHTML(ev)}
+        <div class="fact" style="cursor:default"><span class="lab">Entry</span><b>${ev.priceFrom ? "₹" + ev.priceFrom + ", at the door or online" : "Free. Just turn up."}</b><span></span></div>
+        <div class="fact" style="cursor:default"><span class="lab">Going</span><b>${cg.length ? `${cg.map(c => esc(c.name)).join(", ")} from your circle, ` : ""}${ev.cityGoing + (st === "going" ? 1 : 0)} in all</b><span></span></div>
+        <div class="gap"></div>
+        <div class="btn-row">
+          <button class="btn ${st === "going" ? "btn-line" : ""}" data-go>${st === "going" ? "Going ✓" : "I'm going"}</button>
+          <button class="btn btn-line" data-save>${st === "saved" ? "Saved ✓" : "Save for later"}</button>
+        </div>
+        <div class="gap"></div>
+        <button class="btn btn-line" data-fwd>Tell your circle</button>
+      </div>`, { table: true });
+    Editions.mount($("#card", sh), ev, ev.concept, { reveal });
+    sh.addEventListener("click", e => {
+      if (e.target.closest("[data-ics]")) downloadICS(ev);
+      else if (e.target.closest("[data-maps]")) openMaps(ev.venue);
+      else if (e.target.closest("[data-go]") || e.target.closest("[data-save]")) {
+        const v = e.target.closest("[data-go]") ? "going" : "saved";
+        if (S.townState[ev.id] === v) delete S.townState[ev.id];
+        else {
+          S.townState[ev.id] = v;
+          if (v === "going") Store.note(`<b>You</b> are going to <i>${esc(ev.title)}</i> at ${esc(ev.venueName)}`);
+        }
+        Store.save(); haptic(8);
+        closeSheet(sh, () => { refresh(); openListing(ev, false); });
+      } else if (e.target.closest("[data-fwd]")) {
+        const text = `*${ev.title}*\n${ev.tagline}\n\n${when(ev)}\n${ev.venue}\n${ev.priceFrom ? "₹" + ev.priceFrom : "Free"}\n\nShall we?`;
+        if (navigator.share) navigator.share({ title: ev.title, text }).catch(() => {});
+        else open("https://wa.me/?text=" + encodeURIComponent(text), "_blank");
+      }
+    });
+  }
+
+  /* ============================================================
+     KEEPSAKES
+     ============================================================ */
+  function renderKept() {
+    const past = Store.past();
+    setScreen(`
+      <header class="mast">
+        <div class="mast-row">${WORDMARK}<span class="lab">${past.length} kept</span></div>
+        <h1>Keepsakes</h1>
+        <p>Every occasion keeps its invitation, its guest list and its photographs.</p>
+      </header>
+      <div class="shelf">
+        ${past.map(ev => `
+          <button class="keep" data-album="${ev.id}">
+            <span data-thumb="${ev.id}"></span>
+            <span>
+              <span class="lab">${esc(Engine.longDate(ev))}</span>
+              <h3>${esc(ev.title)}</h3>
+              <p>${counts(ev).yes} were there · ${ev.photos.length ? ev.photos.length + " photographs" : "no photographs yet"}</p>
+              ${ev.photos.length ? `<span class="contact">${ev.photos.slice(0, 6).map(p => `<i style="background-image:url('${p.src}')"></i>`).join("")}</span>` : `<span class="lab" style="display:block;margin-top:12px;color:var(--stamp)">Add the first →</span>`}
+            </span>
+          </button>`).join("") || `<div class="empty"><h3>Nothing kept yet.</h3><p>Once an occasion has happened, it moves here with its photographs.</p></div>`}
+      </div>`);
+    mountThumbs();
+    screen.onclick = e => { const a = e.target.closest("[data-album]"); if (a) openAlbum(a.dataset.album); };
+  }
+
+  function openAlbum(id) {
+    const ev = Store.ev(id);
+    if (!ev) return;
+    const sh = openSheet("Keepsake", `
+      <div class="c-pad" style="padding-bottom:16px">
+        <span class="lab">${esc(Engine.longDate(ev))} · ${esc(ev.venue)}</span>
+        <h2 class="c-h" style="margin:8px 0 0">${esc(ev.title)}</h2>
+      </div>
+      <div class="sheetfilm">
+        ${ev.photos.map((p, i) => `<span><img src="${p.src}" alt=""><span class="fno">${i + 1}A</span></span>`).join("")}
+        <label for="add">+ Add</label>
+      </div>
+      <input type="file" id="add" accept="image/*" multiple hidden>
+      <div class="c-pad">
+        <div class="stack">
+          ${ev.photos.length ? `<button class="btn" id="reel">Play it back</button>` : ""}
+          <button class="btn btn-line" id="inv">The original invitation</button>
+        </div>
+        <p class="prose" style="margin:18px 0 0">${counts(ev).yes} people said yes: ${replies(ev).filter(r => r.status === "yes").map(r => esc(r.name)).join(", ") || "the guest list was kept private"}.</p>
+      </div>`);
+    $("#add", sh).onchange = async e => {
+      const files = [...e.target.files].slice(0, 12);
+      for (const f of files) { const src = await compress(f); if (src) ev.photos.push({ src }); }
+      Store.save(); haptic(10);
+      Store.note(`<b>You</b> added ${files.length} photograph${files.length > 1 ? "s" : ""} to <i>${esc(ev.title)}</i>`);
+      closeSheet(sh, () => { refresh(); openAlbum(id); });
+    };
+    const reel = $("#reel", sh);
+    if (reel) reel.onclick = () => playReel(ev);
+    $("#inv", sh).onclick = () => closeSheet(sh, () => openInvite(ev.id));
+  }
+
+  function playReel(ev) {
+    const caps = [ev.tagline, `${counts(ev).yes} people, one evening.`, "That's a wrap.", ev.title];
+    const r = document.createElement("div");
+    r.className = "reel";
+    overlays.appendChild(r);
+    let i = 0;
+    const frame = () => {
+      const p = ev.photos[i % ev.photos.length];
+      r.innerHTML = `<div class="frame" style="background-image:url('${p.src}')"></div><span class="lab brand" style="color:#F3EFE7">jalsa · ${esc(ev.title)}</span><div class="cap">${esc(caps[i % caps.length])}</div>`;
+      i++;
+    };
     frame();
     const iv = setInterval(frame, 3200);
-    reel.onclick = () => { clearInterval(iv); reel.remove(); };
-    haptic([10, 60, 10]);
+    r.onclick = () => { clearInterval(iv); r.remove(); };
   }
 
   /* ============================================================
-     PULSE
+     YOU
      ============================================================ */
-  const pulseBody = () => `
-    <div class="pagepad" style="padding-top:6px">
-      ${S.pulse.map(p => `
-        <div class="pulse-item">
-          <div class="av" style="background:var(--midnight-3);margin:0;border-color:transparent">✦</div>
-          <div class="ptxt">${p.text}<div class="pwhen">${timeAgo(p.at)}</div></div>
-        </div>`).join("")}
-      <div class="spacer"></div>
-      <p class="mic-note">ONLY YOUR PEOPLE. NO ALGORITHM. NO STRANGERS.</p>
-    </div>`;
-
-  function renderPulse() {
-    setScreen(`
-      <div class="apphead">
-        <div><h1>Pulse</h1><div class="sub">what your circle is up to</div></div>
-        <div class="wordmark">JALSA<span class="dev">जलसा</span></div>
-      </div>
-      ${pulseBody()}`);
-  }
-
-  function openPulseOverlay() {
-    const ov = openOverlay(`
-      <div class="ov-top">${backBtn}<span class="ov-title">Pulse</span><span style="width:40px"></span></div>
-      <div class="ov-scroll">${pulseBody()}</div>`);
-    ov.querySelector("[data-close]").onclick = () => closeOverlay(ov);
-  }
-
-  /* ============================================================
-     DISCOVER — the city layer (public events, venues, tickets)
-     Second growth vector: FOMO crossover with your circle.
-     ============================================================ */
-  const DISCOVER_CATS = ["All", "Gigs", "Nightlife", "Workshops", "Open Mic", "Markets", "Art", "Food", "Wellness"];
-  let discoverFilter = "All";
-
-  function priceLabel(n) { return n > 0 ? `₹${n}` : "FREE"; }
-
-  function renderDiscover() {
-    const all = Store.discover();
-    const list = discoverFilter === "All" ? all : all.filter(e => e.category === discoverFilter);
-    const featured = discoverFilter === "All" ? all.slice().sort((a, b) => b.cityGoing - a.cityGoing)[0] : null;
-    const rest = featured ? list.filter(e => e.id !== featured.id) : list;
-
-    setScreen(`
-      <div class="apphead">
-        <div><h1>Discover</h1><div class="sub">what Bengaluru is doing this week</div></div>
-        <div class="wordmark">JALSA<span class="dev">जलसा</span></div>
-      </div>
-      <div class="chiprow scroll" id="disc-cats" style="margin-bottom:14px">
-        ${DISCOVER_CATS.map(c => `<button class="chip ${c === discoverFilter ? "on" : ""}" data-cat="${c}">${c}</button>`).join("")}
-      </div>
-      <div class="feed" id="disc-feed">
-        ${featured ? featuredCard(featured) : ""}
-        ${rest.length || featured
-          ? rest.map((e, i) => discoverCard(e, i)).join("")
-          : `<div class="empty"><div class="big">Nothing in ${esc(discoverFilter)} yet.</div><p>Try another category — the city's always got something on.</p></div>`}
-        <p class="mic-note" style="padding:8px 0 0">PUBLIC EVENTS · POWERED BY BENGALURU VENUES</p>
-      </div>`);
-
-    $("#disc-cats").onclick = e => {
-      const c = e.target.closest("[data-cat]"); if (!c) return;
-      discoverFilter = c.dataset.cat; haptic(6); renderDiscover();
-    };
-    $("#disc-feed").onclick = e => {
-      const card = e.target.closest("[data-disc]");
-      if (card) { openDiscover(card.dataset.disc); return; }
-    };
-  }
-
-  function circleGoingHTML(ev) {
-    const cg = ev.circleGoing || [];
-    if (!cg.length) return `<span class="going-label"><b>${ev.cityGoing}</b> going in the city</span>`;
-    const avs = cg.slice(0, 3).map((r, i) => avatarHTML(r, i)).join("");
-    const names = cg.length === 1 ? cg[0].name : `${cg[0].name} +${cg.length - 1}`;
-    return `<div style="display:flex;align-items:center"><div class="avstack">${avs}</div><span class="going-label"><b style="color:var(--ember)">${esc(names)}</b> from your circle</span></div>`;
-  }
-
-  function featuredCard(ev) {
-    const st = S.discoverState[ev.id];
-    return `
-    <article class="featured" data-disc="${ev.id}">
-      <div class="feat-hero" style="${Templates.heroStyle(ev.concept)}">
-        <span class="feat-flag">🔥 MOST WANTED IN BLR</span>
-        <span class="fc-type">${ev.glyph} ${esc(ev.category)} · ${esc(ev.venueName)}</span>
-        <div>
-          <div class="feat-title" style="${Templates.heroTitleStyle(ev.concept)}">${esc(ev.title)}</div>
-          <div class="fc-tag">${esc(ev.tagline)}</div>
-        </div>
-        <span class="feat-price">${priceLabel(ev.priceFrom)}</span>
-      </div>
-      <div class="fc-body">
-        <div class="fc-meta">
-          <span>🗓 <b>${whenLine(ev)}</b></span>
-          <span>📍 <b>${esc(ev.area)}</b></span>
-        </div>
-        <div class="fc-foot">
-          ${circleGoingHTML(ev)}
-          <button class="btn btn-ember btn-sm" data-disc="${ev.id}">${st === "going" ? "Going ✓" : "See it →"}</button>
-        </div>
-      </div>
-    </article>`;
-  }
-
-  function discoverCard(ev, i) {
-    const st = S.discoverState[ev.id];
-    return `
-    <article class="feedcard disc-card" style="--i:${i}" data-disc="${ev.id}">
-      <div class="disc-row">
-        <div class="disc-thumb" style="${Templates.heroStyle(ev.concept)}">
-          <span class="disc-glyph" style="color:${ev.concept.pal.a}">${ev.glyph}</span>
-          <span class="disc-price">${priceLabel(ev.priceFrom)}</span>
-        </div>
-        <div class="disc-info">
-          <div class="disc-cat">${esc(ev.category)} · ${esc(ev.area)}</div>
-          <div class="disc-title">${esc(ev.title)}</div>
-          <div class="disc-venue">${esc(ev.venueName)} · ${whenLine(ev)}</div>
-          <div class="disc-foot">
-            ${(ev.circleGoing && ev.circleGoing.length)
-              ? `<span class="disc-crossover"><b>${esc(ev.circleGoing[0].name)}${ev.circleGoing.length > 1 ? " +" + (ev.circleGoing.length - 1) : ""}</b> going</span>`
-              : `<span class="disc-city">${ev.cityGoing} going</span>`}
-            ${st === "going" ? `<span class="disc-tag going">GOING ✓</span>` : st === "saved" ? `<span class="disc-tag saved">SAVED</span>` : ""}
-          </div>
-        </div>
-      </div>
-    </article>`;
-  }
-
-  function openDiscover(id, reveal = true) {
-    const ev = Store.discoverEv(id);
-    if (!ev) return;
-    const st = S.discoverState[id];
-    const paid = ev.priceFrom > 0;
-
-    const ov = openOverlay(`
-      <div class="viewer ov-scroll">
-        <div class="invite-wrap" id="disc-slot"></div>
-        <div class="viewer-actions">
-          ${backBtn}
-          <button class="icon-btn" data-share aria-label="Share"><svg viewBox="0 0 24 24"><path d="M12 15V4m0 0L8 8m4-4 4 4"/><path d="M5 13v6a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-6"/></svg></button>
-        </div>
-        <div class="sheet detail-sheet">
-          <div class="grab"></div>
-          <div class="disc-badge">${esc(ev.category)}</div>
-          <div class="ds-title">${esc(ev.title)}</div>
-          <div class="ds-host">${esc(ev.venueName)} · ${esc(ev.area)}, Bengaluru</div>
-
-          <div class="ds-grid">
-            <div class="ds-cell tap" data-ics><div class="k">When · tap to save</div><div class="v">${whenLine(ev)} <span class="go">＋ CAL</span></div></div>
-            <div class="ds-cell tap" data-maps><div class="k">Where · tap for maps</div><div class="v">${esc(ev.venueName)} <span class="go">↗ MAP</span></div></div>
-          </div>
-
-          <div class="upi-card">
-            <div class="amt">${priceLabel(ev.priceFrom)}</div>
-            <div class="why">${paid ? "entry / cover · pay at the venue or grab tickets online" : "no cover · just show up and vibe"}<br><span style="font-family:var(--font-mono);font-size:9px;letter-spacing:.06em">${(ev.tags || []).map(t => "#" + t).join("  ")}</span></div>
-          </div>
-
-          <div class="section-label">Who's going</div>
-          <div class="disc-going">
-            <div class="avstack">${(ev.circleGoing || []).map((r, i) => avatarHTML(r, i)).join("") || ""}</div>
-            <div class="disc-going-txt">
-              ${(ev.circleGoing && ev.circleGoing.length)
-                ? `<b>${ev.circleGoing.map(c => c.name).join(", ")}</b> from your circle${st === "going" ? " · and you" : ""}<br>`
-                : ""}
-              <span style="color:var(--slate-2)">${ev.cityGoing + (st === "going" ? 1 : 0)} going across Bengaluru</span>
-            </div>
-          </div>
-
-          <div class="section-label">Your move</div>
-          <div class="rsvp-row">
-            <button class="rsvp-btn ${st === "going" ? "sel-yes" : ""}" data-go>${st === "going" ? (paid ? "Going ✓" : "In ✓") : (paid ? `Get tickets · ₹${ev.priceFrom}` : "I'm going")}</button>
-            <button class="rsvp-btn ${st === "saved" ? "sel-maybe" : st === "going" ? "dim" : ""}" data-save>${st === "saved" ? "Saved" : "Save"}</button>
-          </div>
-          <div class="spacer"></div>
-          <button class="btn btn-line" data-share>Share this with your circle</button>
-          <div class="spacer"></div>
-        </div>
-      </div>`);
-
-    ov.querySelector(".invite-wrap").appendChild(Templates.render(ev, ev.concept, { reveal }));
-    if (reveal) haptic([8, 60, 8]);
-
-    ov.onclick = e => {
-      if (e.target.closest("[data-close]")) { closeOverlay(ov); if (currentNav === "discover") renderDiscover(); return; }
-      if (e.target.closest("[data-share]")) { shareDiscover(ev); return; }
-      if (e.target.closest("[data-ics]")) { downloadICS({ ...ev, venue: ev.venueName + ", " + ev.area }); return; }
-      if (e.target.closest("[data-maps]")) { openMaps({ venue: ev.venueName + " " + ev.area }); return; }
-      const go = e.target.closest("[data-go]");
-      if (go) {
-        if (S.discoverState[id] === "going") { delete S.discoverState[id]; Store.save(); haptic(8); }
-        else {
-          S.discoverState[id] = "going"; Store.save(); haptic(35); burst(go);
-          Store.addPulse(`<b>You</b> are going to <b>${esc(ev.title)}</b> at ${esc(ev.venueName)}`);
-          toast(paid ? `Nice. Tickets open on ${esc(ev.venueName)}'s page — you're marked going.` : `You're going. ${(ev.circleGoing[0] || {}).name || "The city"} will be happy.`);
-        }
-        closeOverlay(ov); openDiscover(id, false); return;
-      }
-      const sv = e.target.closest("[data-save]");
-      if (sv) {
-        if (S.discoverState[id] === "saved") delete S.discoverState[id];
-        else S.discoverState[id] = "saved";
-        Store.save(); haptic(10);
-        closeOverlay(ov); openDiscover(id, false); return;
-      }
-    };
-  }
-
-  function shareDiscover(ev) {
-    const d = new Date(ev.date + "T00:00");
-    const when = d.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" });
-    const text = [
-      `*${ev.title}* ${ev.glyph}`,
-      ev.tagline,
-      ``,
-      `📍 ${ev.venueName}, ${ev.area}`,
-      `🗓 ${when} · ${Engine.formatTime(ev.time)} · ${priceLabel(ev.priceFrom)}`,
-      ``,
-      `Found on JALSA Discover — Bengaluru's on.`,
-    ].join("\n");
-    haptic(10);
-    if (navigator.share) { navigator.share({ title: ev.title, text }).catch(() => {}); return; }
-    window.open("https://wa.me/?text=" + encodeURIComponent(text), "_blank");
-    navigator.clipboard?.writeText(text).then(() => toast("Copied — spread the word.")).catch(() => {});
-  }
-
-  /* ============================================================
-     PROFILE
-     ============================================================ */
-  function renderProfile() {
+  function renderYou() {
     const hosted = S.events.filter(e => e.isMine).length;
-    const attended = Object.values(S.myRsvps).filter(v => v === "yes").length;
-    const picks = S.profile.tierPicks;
-    const total = Math.max(1, picks[1] + picks[2] + picks[3]);
-    const vibeNames = (S.profile.vibes || []).map(id => (VIBES.find(v => v.id === id) || {}).nm).filter(Boolean);
-    const tierColors = { 1: "#9BB59A", 2: "var(--marigold)", 3: "#B5FF3A" };
-    const domTier = [1, 2, 3].sort((a, b) => picks[b] - picks[a])[0];
-    const sig = { 1: "Quiet luxury. Editorial soul.", 2: "Confident. One wrong colour, on purpose.", 3: "Organized chaos. Grain on grain." }[domTier];
-
+    const accepted = Object.values(S.myReplies).filter(v => v === "yes").length + Object.values(S.townState).filter(v => v === "going").length;
+    const photos = S.events.reduce((a, e) => a + e.photos.length, 0);
+    const picks = S.profile.picks || {};
+    const total = Object.values(picks).reduce((a, b) => a + b, 0);
+    const top = houseStyle();
     setScreen(`
-      <div class="me-head">
-        <div class="me-av">${esc((S.profile.name || "J")[0].toUpperCase())}</div>
-        <div>
-          <div class="me-name">${esc(S.profile.name || "You")}</div>
-          <div class="me-sub">${vibeNames.join(" · ") || "undeclared energy"}</div>
+      <header class="mast">
+        <div class="mast-row">${WORDMARK}<span class="lab">Account</span></div>
+      </header>
+      <div class="you-card">
+        <span class="lab">Printed on every invitation as</span>
+        <div class="you-name">${esc(S.profile.name)}</div>
+        <div class="ledger">
+          <div><b>${hosted}</b><span class="lab">Hosted</span></div>
+          <div><b>${accepted}</b><span class="lab">Accepted</span></div>
+          <div><b>${photos}</b><span class="lab">Photos</span></div>
         </div>
       </div>
-      <div class="pagepad">
-        <div class="stat-grid" style="grid-template-columns:repeat(3,1fr);margin-top:14px">
-          <div class="stat hot"><div class="n">${hosted}</div><div class="l">Hosted</div></div>
-          <div class="stat gold"><div class="n">${attended}</div><div class="l">Going to</div></div>
-          <div class="stat"><div class="n">${S.events.reduce((a, e) => a + e.photos.length, 0)}</div><div class="l">Memories</div></div>
+      <div class="section"><h2>Your house style</h2><span class="lab">${total} chosen</span></div>
+      <ul class="style-list">
+        ${Editions.LIST.map(k => {
+          const ed = Editions.get(k), n = picks[k] || 0;
+          return `<li><span class="no">Nº ${ed.no}</span><span class="nm">${ed.name}</span><span class="bar"><i style="width:${total ? n / total * 100 : 0}%"></i></span></li>`;
+        }).join("")}
+      </ul>
+      <p class="prose">${top ? `You keep choosing <b>${Editions.get(top).name}</b>, so it comes up first when a brief could go either way.` : "Each proof you take teaches the press your taste. It leans on it when a brief could go either way."}</p>
+
+      <div class="section"><h2>Colophon</h2></div>
+      <p class="prose">Set in Bodoni Moda, Schibsted Grotesk and IBM Plex Mono, with Tiro Devanagari for the जलसा. The six editions are drawn from Indian print: letterpress cards, Sivakasi matchbox labels, single-screen cinema tickets, riso zines, telegram forms and the Polaroid. Commissions are drawn by Claude.</p>
+      <p class="prose">Designed and built by Jia Oswal with Claude Code, Bengaluru, 2026.</p>
+      <div class="pad" style="margin-top:22px">
+        <div class="stack">
+          <button class="btn btn-line" id="rename">Change your name</button>
+          <button class="btn btn-line" id="install">Add jalsa to your home screen</button>
+          <button class="link" id="reset" style="display:block;margin:14px auto 0">Start over on this device</button>
         </div>
-
-        <div class="section-label">Your taste signature</div>
-        ${[1, 2, 3].map(t => `
-          <div class="taste-bar">
-            <span class="tl">${["", "Whisper", "Flex", "Unhinged"][t]}</span>
-            <div class="track"><i style="width:${Math.round((picks[t] / total) * 100)}%;background:${tierColors[t]}"></i></div>
-            <span class="pc">${Math.round((picks[t] / total) * 100)}%</span>
-          </div>`).join("")}
-        <p class="create-sub" style="margin-top:10px">${total > 1 ? `The engine is learning you: <b style="color:var(--pearl)">${sig}</b> Every invite you pick sharpens the next three.` : "Pick invite concepts and the engine learns your aesthetic. Three events in, it starts designing like you."}</p>
-
-        <div class="manifesto">
-          "The invite IS the event. When someone receives a JALSA invite, the experience has already begun."
-          <div class="who">JALSA · BENGALURU · 2026</div>
-        </div>
-
-        <div class="section-label">Make it yours</div>
-        <button class="btn btn-ghost" id="install-btn">Install JALSA on your phone</button>
-        <div class="spacer"></div>
-
-        <div class="section-label">Danger zone</div>
-        <button class="btn btn-line" id="reset-btn">Reset everything — fresh jalsa</button>
-        <div class="spacer"></div>
-        <p class="mic-note">MADE IN BENGALURU · THE PLACE YOUR MOMENTS LIVE</p>
-      </div>`);
-    $("#reset-btn").onclick = () => {
-      if (confirm("Wipe all events, RSVPs and memories on this device?")) Store.reset();
-    };
-    $("#install-btn").onclick = () => window.installJalsa();
+      </div>
+      <div class="gap"></div>`);
+    $("#rename").onclick = () => renderOnboard(1);
+    $("#install").onclick = () => window.installJalsa();
+    $("#reset").onclick = () => { if (confirm("Clear every invitation, reply and photograph on this device?")) Store.reset(); };
   }
 
   /* ============================================================
-     GUEST ARRIVAL — the viral loop, made real
-     A shared link opens here for anyone, no account needed.
-     TRIGGER (link) → ACTION (rsvp) → REWARD (in) → INVESTMENT (join)
+     ARRIVAL — a guest opens the link
      ============================================================ */
-  function readInviteHash() {
-    const m = (location.hash || "").match(/[#&]i=([^&]+)/);
-    return m ? Store.decodeEvent(decodeURIComponent(m[1])) : null;
-  }
-
-  function clearHash() {
-    history.replaceState(null, "", location.pathname + location.search);
-  }
-
-  function renderGuestArrival(ev) {
+  function renderArrival(ev) {
     tabbar.classList.add("hidden");
-    const already = Object.prototype.hasOwnProperty.call(S.guestRsvps || {}, ev.id);
-    S.guestRsvps = S.guestRsvps || {};
+    overlays.innerHTML = "";
+    const code = ev.cloudId || ev.slug;
+    const mine = S.events.find(e => e.isMine && e.slug === ev.slug);
+    const prior = S.guestReplies[code];
+    const d = Editions.parts(ev);
 
     setScreen(`
       <div class="arrival">
-        <div class="arr-topbar">
-          <span class="wordmark">JALSA<span class="dev">जलसा</span></span>
-          <span class="arr-from"><b>${esc(ev.hostName)}</b>&nbsp;invited you</span>
-        </div>
-        <div class="arr-invite" id="arr-slot"></div>
-        <div class="arr-dock" id="arr-dock"></div>
-      </div>`);
-
-    const slot = $("#arr-slot");
-    slot.appendChild(Templates.render(ev, ev.concept, { reveal: true }));
-    haptic([8, 60, 8]);
-
-    renderDock();
-
-    function renderDock() {
-      const dock = $("#arr-dock");
-      const my = S.guestRsvps[ev.id];
-      if (!my) {
-        dock.innerHTML = `
-          <div class="kicker">You're invited ${ev.glyph}</div>
-          <div class="ev-line">${esc(ev.title)}</div>
-          <div class="ev-meta">${whenLine(ev)} · ${esc(ev.venue || "location drops soon")}</div>
-          <p class="prompt">Tap once. No app, no signup — ${esc(ev.hostName)} just needs a headcount.</p>
-          <div class="rsvp-row" id="arr-rsvp">
-            <button class="rsvp-btn" data-g="yes">I'm in<span class="hint">see you there</span></button>
-            <button class="rsvp-btn" data-g="maybe">Maybe<span class="hint">tentative</span></button>
-            <button class="rsvp-btn" data-g="no">Can't<span class="hint">next time</span></button>
+        <div class="arr-top">${WORDMARK}<span class="lab">${mine ? "Your own invitation, as guests see it" : "An invitation"}</span></div>
+        <div class="envelope-stage" id="es">
+          <div class="env" id="env" role="button" tabindex="0" aria-label="Open the envelope">
+            <div class="env-back"></div>
+            <div class="env-card" id="ec"></div>
+            <div class="env-front"></div>
+            <div class="env-flap"></div>
+            <div class="env-addr">For<b>you</b>with love from ${esc(ev.hostName)}</div>
+            <div class="env-post">BENGALURU<br>${esc(d.dd)} ${esc((d.mo3 || "").toUpperCase())}<br>JALSA</div>
+            <div class="env-seal">जलसा</div>
           </div>
-          <div class="arr-foot">jalsa · the invite is the event</div>`;
-        $("#arr-rsvp").onclick = e => {
-          const b = e.target.closest("[data-g]"); if (!b) return;
-          const status = b.dataset.g;
-          S.guestRsvps[ev.id] = status;
-          Store.save();
-          if (ev.cloudId) Cloud.rsvp(ev.cloudId, S.profile.name || "A guest", status);
-          if (status === "yes") { haptic(35); burst(b); }
-          else haptic(10);
-          setTimeout(renderConvert, 480);
-        };
-      } else {
-        renderConvert();
-      }
-    }
+          <div class="env-hint"><span class="lab">Tap to open</span><p>${esc(ev.hostName)} has sent you something.</p></div>
+        </div>
+      </div>`, { bare: true });
+    Editions.mount($("#ec"), ev, ev.concept);
 
-    function renderConvert() {
-      const my = S.guestRsvps[ev.id];
-      const dock = $("#arr-dock");
-      const headline = my === "yes" ? "You're in. 🔥" : my === "maybe" ? "Noted — a soft yes." : "Maybe next one.";
-      const sub = my === "yes"
-        ? `${esc(ev.hostName)} can see you're coming.${ev.upiAmount ? ` ₹${ev.upiAmount}/head gets collected here — no awkward chasing.` : ""}`
-        : `${esc(ev.hostName)} has been told. ${my === "maybe" ? "Everyone knows what maybe means. 👀" : "No hard feelings."}`;
-      dock.innerHTML = `
-        <div class="arr-convert">
-          <div class="big">${headline}</div>
-          <div class="sub">${sub}</div>
-          ${ev.upiAmount && my === "yes" ? `<button class="btn btn-ghost" id="g-pay" style="margin-bottom:10px">Pay ₹${ev.upiAmount} via UPI</button>` : ""}
-          <button class="btn btn-ember" id="g-join">Plan yours on JALSA →</button>
-          <div class="spacer"></div>
-          <button class="btn btn-line" id="g-add">＋ Save this to my JALSA</button>
-          <div class="arr-foot">this invite was designed, not typed · made on jalsa</div>
+    const env = $("#env");
+    const opened = () => {
+      if (env.classList.contains("open")) return;
+      env.classList.add("open");
+      haptic([6, 60, 10]);
+      $(".env-hint").style.opacity = 0;
+      setTimeout(afterOpen, 1500);
+    };
+    env.onclick = opened;
+    env.onkeydown = e => { if (e.key === "Enter" || e.key === " ") opened(); };
+    if (prior) { afterOpen(); }
+
+    function afterOpen() {
+      const stage = $("#es");
+      stage.outerHTML = `
+        <div class="arr-after">
+          <div class="viewer-card" id="card" style="margin-top:18px"></div>
+          <div class="slip">
+            <span class="lab">${esc(ev.hostName)} requests the pleasure of your company</span>
+            <h2 style="margin-top:8px">${esc(ev.title)}</h2>
+            <p class="by">${esc(ev.tagline)}</p>
+            ${factsHTML(ev)}
+            ${ev.upiAmount ? payHTML(ev) : ""}
+            <div id="reply-slot"></div>
+            <div id="convert"></div>
+          </div>
         </div>`;
-      const payBtn = $("#g-pay");
-      if (payBtn) payBtn.onclick = () => payUPI(ev, payBtn);
-      $("#g-join").onclick = () => {
-        haptic(14); clearHash();
-        if (!S.profile.onboarded) renderOnboard(0);
-        else { tabbar.classList.remove("hidden"); nav("create"); }
-      };
-      $("#g-add").onclick = () => {
-        const added = Store.addSharedEvent({ ...ev });
-        S = Store.get();
-        if (added) { S.myRsvps[S.events[0].id] = my; Store.save(); }
-        haptic(12); clearHash();
-        toast(added ? "Saved to your Scene." : "Already in your Scene.");
-        tabbar.classList.remove("hidden"); nav("feed");
+      Editions.mount($("#card"), ev, ev.concept, { reveal: !prior });
+      $(".arrival").addEventListener("click", e => {
+        if (e.target.closest("[data-ics]")) downloadICS(ev);
+        else if (e.target.closest("[data-maps]")) openMaps(ev.venue);
+        else if (e.target.closest("[data-pay]")) payUPI(ev, e.target.closest("[data-pay]"));
+      });
+      mountReply($("#reply-slot"), {
+        current: prior, askName: true, name: S.profile.name,
+        onReply: (status, name) => {
+          S.guestReplies[code] = status;
+          if (!S.profile.name) S.profile.name = name;
+          if (mine) {
+            // opened on the host's own device: put the reply straight in the register
+            mine.rsvps.push({ name, hue: Engine.hashStr(name) % 360, status, src: "link", paid: false });
+          }
+          Store.save();
+          if (Cloud.enabled && !mine) Cloud.rsvp(code, name, status);
+          convert(status);
+        },
+      });
+      if (prior) convert(prior);
+    }
+
+    function convert(status) {
+      const line = status === "yes" ? `${ev.hostName} will see your name in the register.` : status === "no" ? `${ev.hostName} has been told, kindly.` : `${ev.hostName} knows you're trying.`;
+      $("#convert").innerHTML = `
+        <p class="prose" style="margin:18px 0 0;text-align:center">${esc(line)}</p>
+        <div class="stack" style="margin-top:22px">
+          ${status === "yes" && ev.date ? `<button class="btn btn-line" data-ics>Put it in my calendar</button>` : ""}
+          <button class="btn" id="own">Make your own invitation <span class="arr">→</span></button>
+          <button class="link" id="keep" style="display:block;margin:10px auto 0">Keep this in my jalsa</button>
+        </div>
+        <p class="lab" style="text-align:center;margin-top:28px">Printed by jalsa · An invitation press</p>`;
+      $("#own").onclick = () => { clearHash(); haptic(8); if (S.profile.onboarded) { tabbar.classList.remove("hidden"); nav("upcoming"); openCreate(); } else { S._after = "new"; renderOnboard(0); } };
+      $("#keep").onclick = () => {
+        clearHash();
+        const added = !mine && Store.addShared(Object.assign({}, ev, { cloudId: Cloud.enabled ? code : null }));
+        if (added) { S.myReplies[S.events[0].id] = status; Store.save(); }
+        toast(mine ? "That one's yours already." : added ? "Kept in your Upcoming." : "Already in your Upcoming.");
+        if (S.profile.onboarded) { tabbar.classList.remove("hidden"); nav("upcoming"); } else renderOnboard(0);
       };
     }
   }
 
-  /* ============================ PWA ========================== */
-  function registerPWA() {
-    if ("serviceWorker" in navigator && /^https?:$/.test(location.protocol)) {
-      navigator.serviceWorker.register("sw.js").catch(() => {});
-    }
-  }
-  let deferredInstall = null;
-  window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); deferredInstall = e; });
-  window.installJalsa = async () => {
-    if (!deferredInstall) { toast("Open the browser menu → “Add to Home Screen”."); return; }
-    deferredInstall.prompt();
-    await deferredInstall.userChoice.catch(() => {});
-    deferredInstall = null;
-  };
+  function clearHash() { history.replaceState(null, "", location.pathname + location.search); }
 
-  function cloudCodeFromHash() {
-    const m = (location.hash || "").match(/[#&]e=([^&]+)/);
-    return m ? decodeURIComponent(m[1]) : null;
-  }
-
-  // Open a shared invite: cloud link (#e=) fetched live, else self-contained (#i=).
-  async function routeShared() {
-    const code = cloudCodeFromHash();
-    if (code) {
+  async function route() {
+    const h = location.hash || "";
+    const e = h.match(/[#&]e=([^&]+)/);
+    const i = h.match(/[#&]i=([^&]+)/);
+    if (e) {
+      const code = decodeURIComponent(e[1]);
       tabbar.classList.add("hidden");
-      setScreen(`
-        <div class="arrival">
-          <div class="arr-topbar"><span class="wordmark">JALSA<span class="dev">जलसा</span></span></div>
-          <div class="cloud-load">Opening your invite…</div>
-        </div>`);
+      setScreen(`<div class="arrival"><div class="arr-top">${WORDMARK}</div><div class="press"><div class="press-line">Fetching your invitation…</div></div></div>`, { bare: true });
       const ev = await Cloud.fetchEvent(code);
-      if (ev) { renderGuestArrival(ev); return true; }
-      toast("Couldn't load that invite — it may have expired.");
+      if (ev) { renderArrival(ev); return true; }
+      const local = S.events.find(x => x.slug === code);
+      if (local) { renderArrival(local); return true; }
+      toast("That invitation couldn't be found.");
+      clearHash();
+      return false;
     }
-    const shared = readInviteHash();
-    if (shared) { renderGuestArrival(shared); return true; }
+    if (i) {
+      const ev = Store.decodeEvent(decodeURIComponent(i[1]));
+      if (ev) { if (Cloud.enabled) ev.cloudId = ev.slug; renderArrival(ev); return true; }
+    }
     return false;
   }
+  addEventListener("hashchange", async () => { if (!(await route())) boot(); });
 
-  // re-route if a link is opened while the app is already running
-  window.addEventListener("hashchange", () => { routeShared(); });
+  /* ============================ PWA ========================== */
+  if ("serviceWorker" in navigator && /^https?:$/.test(location.protocol)) navigator.serviceWorker.register("sw.js").catch(() => {});
+  let installEvt = null;
+  addEventListener("beforeinstallprompt", e => { e.preventDefault(); installEvt = e; });
+  window.installJalsa = async () => {
+    if (!installEvt) { toast("Use your browser's menu: Add to Home Screen."); return; }
+    installEvt.prompt();
+    await installEvt.userChoice.catch(() => {});
+    installEvt = null;
+  };
+
+  /* keep the host's counts fresh in the background */
+  async function syncReplies() {
+    if (!Cloud.enabled) return;
+    for (const ev of S.events.filter(e => e.isMine && e.cloudOk && !Store.isPast(e))) {
+      ev.cloudRsvps = await Cloud.getRsvps(ev.slug);
+    }
+    Store.save();
+    refresh();
+  }
 
   /* ============================ boot ========================= */
-  registerPWA();
+  function boot() {
+    if (!S.profile.onboarded) { renderOnboard(0); return; }
+    tabbar.classList.remove("hidden");
+    nav(current);
+  }
   (async () => {
-    if (await routeShared()) return;
-    if (!S.profile.onboarded) {
-      renderOnboard(0);
-    } else {
-      tabbar.classList.remove("hidden");
-      nav("feed");
-    }
+    if (await route()) return;
+    boot();
+    syncReplies();
   })();
 })();

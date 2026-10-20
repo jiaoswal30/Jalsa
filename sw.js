@@ -1,17 +1,15 @@
-/* JALSA service worker — offline app shell */
-const CACHE = "jalsa-v16";
+/* jalsa service worker — offline app shell, network first */
+const CACHE = "jalsa-v20";
 const ASSETS = [
   "./", "./index.html",
-  "./css/app.css?v=16", "./css/invites.css?v=16",
-  "./js/engine.js?v=16", "./js/templates.js?v=16", "./js/store.js?v=16",
-  "./js/cloud.js?v=16", "./js/ai.js?v=16", "./js/app.js?v=16",
+  "./css/jalsa.css?v=20", "./css/editions.css?v=20",
+  "./js/config.js?v=20", "./js/engine.js?v=20", "./js/editions.js?v=20", "./js/store.js?v=20",
+  "./js/cloud.js?v=20", "./js/ai.js?v=20", "./js/app.js?v=20",
   "./manifest.webmanifest", "./icon.svg", "./icon-maskable.svg",
 ];
 
 self.addEventListener("install", e => {
-  e.waitUntil(
-    caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()).catch(() => {})
-  );
+  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()).catch(() => {}));
 });
 
 self.addEventListener("activate", e => {
@@ -22,13 +20,11 @@ self.addEventListener("activate", e => {
   );
 });
 
-// network-first for our own files: always fetch the latest when online, fall
-// back to cache only when offline. This prevents stale UI after a deploy.
-// Cross-origin calls (Supabase API, fonts) go straight to the network.
+// our own files: fetch fresh when online, fall back to cache offline.
+// cross-origin (Supabase, fonts) goes straight to the network.
 self.addEventListener("fetch", e => {
   const req = e.request;
-  if (req.method !== "GET") return;
-  if (new URL(req.url).origin !== self.location.origin) return;
+  if (req.method !== "GET" || new URL(req.url).origin !== self.location.origin) return;
   e.respondWith(
     fetch(req).then(res => {
       const copy = res.clone();

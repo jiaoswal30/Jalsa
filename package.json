@@ -1,7 +1,7 @@
 {
   "name": "jalsa",
   "version": "1.0.0",
-  "description": "JALSA — the invite IS the event. Static, on-device prototype (vanilla HTML/CSS/JS).",
+  "description": "jalsa — an invitation press. Static vanilla HTML/CSS/JS, optional Supabase + Claude.",
   "private": true,
   "scripts": {
     "dev": "npx --yes http-server . -p 8765 -c-1 -o",

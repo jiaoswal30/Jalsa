@@ -1,85 +1,94 @@
-# JALSA — the place your moments live
+# jalsa — an invitation press
 
-*The invite IS the event.*
+*jal·sa (n.) Hindustani. A gathering of people for celebration; the sort of evening that deserves a proper invitation.*
 
-A functional prototype of the JALSA app from the Brand & Product Document (2026), built as a
-zero-install web app. The design system is implemented straight from the Design Intelligence
-Report — three tiers, three studios: **WHISPER · FLEX · UNHINGED**.
+Describe a plan the way you'd text it: *"rooftop birthday for Ananya, sunset, twenty of us"*. jalsa reads the brief, sets three proofs in different printed editions, sends the result as a link that opens like an envelope, and keeps the guest list.
 
-## Run it
+**Live:** `https://jiaoswal30.github.io/Jalsa/` · best on a phone.
 
-Double-click **`index.html`**. That's it — no build, no server, no dependencies.
+---
 
-Works best in Chrome/Edge. On a phone it goes full-screen; on desktop it renders in a phone
-frame. Fonts load from Google Fonts (falls back to system fonts offline). All data lives in
-`localStorage` on your device.
+## The idea
 
-**Installable app (PWA).** When served over http(s) (e.g. GitHub Pages / Vercel), JALSA installs
-to the home screen and works offline via a service worker. There's an **Install JALSA** button
-under the You tab. (Service workers don't run on `file://`, so install only lights up when hosted.)
+Most event apps look like event apps. jalsa is built as a **press** instead, and every part of it uses that vocabulary: *brief, proof, edition, ink, register, stamp*. The look follows from that:
 
-## The core loop (why this exists)
+- **Paper and ink.** Bone paper, fountain-pen black, the violet of an Indian office stamp pad, and vermilion kept for things that are live.
+- **Type.** Bodoni Moda, Schibsted Grotesk, IBM Plex Mono, and Tiro Devanagari for जलसा.
+- **Voice.** Old invitation wording, played straight: *Accepts with pleasure / Declines with regret / Will confirm shortly.* No emoji.
 
-Per the PRD, JALSA's #1 growth engine is **The WhatsApp Link**:
+### The six editions
+
+Each one borrows from a real Indian print tradition rather than "Indian" decoration.
+
+| Nº | Edition | Drawn from |
+|---|---|---|
+| 01 | Letterpress | A debossed bone card with a wax seal |
+| 02 | Sivakasi | Matchbox labels from Sivakasi, India's print capital: sunburst emblem, two misregistered plates |
+| 03 | Talkies | A single-screen cinema ticket, with a perforated stub and a serial number |
+| 04 | Riso | A riso zine: two fluorescent drums with overprint and halftone |
+| 05 | Telegram | A typewritten telegram form that says STOP, with a PRIORITY stamp |
+| 06 | Snapshot | Your own photograph, as a Polaroid taped to a coloured card |
+| 00 | Commission | A one-off poster drawn by Claude for this brief only (needs the cloud) |
+
+Each edition is sized entirely in container units (`cqw`), so one design scales from a thumbnail up to full screen.
+
+## The loop
 
 ```
-TRIGGER   friend shares an invite link on WhatsApp
-ACTION    non-user opens it → full-screen animated invite → RSVPs in ~10s
-REWARD    "You're in" + the invite was genuinely beautiful
-INVESTMENT "Plan yours on JALSA" → they host their own → repeat
+host types a brief → three proofs → corrections → particulars → link
+guest opens the link → sealed envelope → card slides out → reply card → violet stamp
+host's register updates live → nudge the "pencilled in" lot on WhatsApp → collect ₹ by UPI
 ```
 
-That loop is **live and real**. Every share link is **self-contained**: the entire invite
-(title, tagline, date, venue, host, design tier + palette) is encoded into the URL hash, so a
-link opened on *any* device renders the exact invite with **no backend**. Open your own
-published event's link in a new tab/incognito to experience the guest side.
+A guest needs no app and no account, just their name.
 
-> Honest limitation: with no server, a guest's RSVP can't sync back to the host's device.
-> The guest *experience* and the conversion loop are fully real; cross-device RSVP sync is the
-> first thing a Supabase backend would add (the PRD's exact stack).
+## How it's built
 
-## What's inside
+Vanilla HTML, CSS and JS. No build step and no framework. It's hosted on GitHub Pages.
 
-| Feature | Where |
+| File | Role |
 |---|---|
-| **AI Invite Engine** — describe the event like you'd text it; the on-device vibe engine reads event type (16 Indian event types: Holi, dandiya, sangeet, rooftop, farewell…), energy, crowd size and names, then designs **3 animated invite concepts** across the tier system | tap **+** |
-| **Live vibe read** — tokens appear as you type ("holi · chaotic good · 25 log") | create flow |
-| **Generation theatre** — you watch the invite being made ("kerning aggressively…") | create flow |
-| **The Reveal** — full-screen animated invite with staged spring-physics entrance | tap any event |
-| **RSVP with teeth** — morphing Yes/Maybe/Can't buttons, capacity + auto-waitlist, haptics | feed & invite |
-| **Circle feed** — upcoming events from your people only, countdowns, "3 spots left" pressure | Scene tab |
-| **UPI collection** — real `upi://` deep links, per-guest paid tracking, "the venue does not accept vibes as payment" reminders | invite + host desk |
-| **Host Desk** — live stats, capacity bar, guest list, paid toggles, broadcast updates, WhatsApp nudges for the "maybe" people | your events |
-| **WhatsApp-native share** — auto-composed Hinglish share text, `wa.me` deep link, Web Share API | everywhere |
-| **Add to calendar** — one-tap `.ics` download; tap venue → Google Maps | invite sheet |
-| **Rewind** — permanent memory albums, photo upload (auto-compressed), auto-playing **memory reel** with Ken Burns | Rewind tab |
-| **Taste profile** — the engine tracks which tier you pick and starts designing like you | You tab |
-| **Pulse** — activity from your circle, no algorithm, no strangers | Pulse tab |
-| **Guest Arrival** — open a shared link as a non-user: reveal → RSVP → convert | any invite link |
-| **Self-contained share links** — the whole invite rides in the URL, backend-free | share anywhere |
-| **Discover** — city-wide public events (gigs, workshops, markets, open mics) across 8 categories, with **circle-crossover FOMO** ("Sana +2 from your circle going"), venue attribution, ticket/price, Going/Save | Discover tab |
-| **PWA** — installable, offline app shell via service worker | when hosted |
+| `js/engine.js` | Reads a brief on-device (occasion, energy, names, headcount, time of day) and picks three editions |
+| `js/editions.js` | The six editions, plus the scaled mounting that keeps fine print legible in thumbnails |
+| `js/app.js` | Screens and flows: onboarding, Upcoming, Town, Keepsakes, the create flow, the register, guest arrival |
+| `js/store.js` | localStorage state, seed data, and the portable invite payload |
+| `js/cloud.js` | Optional Supabase layer over PostgREST and `fetch`. It fails soft. |
+| `js/ai.js` | Calls the studio and renders its HTML in a sandboxed `<iframe>` with scripts disabled |
+| `supabase/functions/generate-invite` | Edge Function that calls Claude (Opus 5.5) |
+| `sql/supabase-setup.sql` | Tables plus row-level security |
 
-**Scene vs. Discover.** Scene is your circle only (no algorithm, no strangers). Discover is the
-public city layer — the PRD's second growth vector and venue-commission revenue stream — kept
-deliberately separate. Pulse (circle activity) moved to the 🔔 in the Scene header.
+**Two modes.**
 
-The circle is alive: seeded Bengaluru friends RSVP to your published events over the first
-couple of minutes, so the host dopamine loop is real from event one.
+- **Offline** (no keys in `js/config.js`): the whole invite travels inside the link (`#i=…`). Guests see the full experience, and a reply made on the same device lands in the host's register.
+- **Cloud** (keys filled in): links become short (`#e=slug`), replies sync across phones and the register polls every 8 seconds. The studio (AI commissions) also turns on.
 
-## Files
+### Security decisions
 
-```
-index.html            shell + fonts + PWA meta
-manifest.webmanifest  installable-app metadata
-sw.js                 service worker (offline app shell)
-icon.svg / icon-maskable.svg
-css/app.css           app chrome (Midnight / Ember / Pearl / Marigold / Slate)
-css/invites.css       the 3-tier invite design system + reveal animations
-js/engine.js          vibe engine: text → design brief → 3 concepts
-js/templates.js       invite renderers (editorial / poster / split / marquee / chaos / y2k / wall)
-js/store.js           localStorage state, seeded circle + Discover events, link encode/decode
-js/app.js             screens, flows, guest arrival, Discover, interactions
+- **AI output is sandboxed.** Model-written HTML renders in `<iframe sandbox="">`: no scripts, no same-origin access. The function also strips any `<script>` before returning.
+- **Invites can't be edited by others.** Invites are insert-only and there is no update policy, so nobody can rewrite someone else's invite. Slugs carry a random suffix.
+- **Reply inserts are validated.** Inserts are checked by row-level security: status must be one of three values, the name has a length limit, and payload size is capped.
+- **The AI endpoint is public but guarded.** It has an origin allow-list, input limits and a per-IP rate limit. Origins can be spoofed outside a browser, so the real limit is the monthly spend cap in the Anthropic Console.
+
+## Run it locally
+
+```bash
+python3 -m http.server 8765      # or: npm run dev
+# open http://localhost:8765
 ```
 
-To start fresh: **You tab → Reset everything**.
+To reset, go to the You tab and choose *Start over on this device*.
+
+## Turn on the cloud (optional)
+
+1. Create a Supabase project. In the SQL Editor, run `sql/supabase-setup.sql`.
+2. Paste the project URL and publishable key into `js/config.js`.
+3. For the studio: set a monthly spend limit in the Anthropic Console first. Then run:
+   ```bash
+   supabase secrets set ANTHROPIC_API_KEY=sk-ant-…
+   supabase functions deploy generate-invite --no-verify-jwt
+   ```
+   If the site isn't served from `jiaoswal30.github.io`, also set `ALLOWED_ORIGINS`.
+
+---
+
+Designed and built by Jia Oswal with Claude Code. Bengaluru, 2026.

@@ -1,177 +1,143 @@
 // ============================================================
-// JALSA — generate-invite  (Supabase Edge Function, Deno)
-// Calls Claude (Opus 4.8) to design a single, self-contained
-// HTML invitation poster. Streams from Anthropic so long,
-// high-effort generations never hit an idle HTTP timeout.
+// jalsa — generate-invite  (Supabase Edge Function, Deno)
+// "The studio": asks Claude to draw one self-contained HTML
+// invitation poster (1080×1350) for a brief.
 //
-// Secret required (Dashboard → Edge Functions → Secrets, or
-//   `supabase secrets set ANTHROPIC_API_KEY=sk-ant-...`):
-//     ANTHROPIC_API_KEY
+// Secrets (Dashboard → Edge Functions → Secrets):
+//   ANTHROPIC_API_KEY   required
+//   ALLOWED_ORIGINS     optional, comma-separated; defaults below
 //
-// Request  (POST JSON):
-//   { prompt, palette?, details?, referenceImage? }
-//     prompt         : free-text description of the event
-//     palette        : { bg, ink, a, pop } hex strings (optional)
-//     details        : { title, host, date, time, venue } (optional)
-//     referenceImage : { media_type, data }  base64 (optional) — a design to match
+// This endpoint is public, so it guards itself: an origin
+// allow-list, hard input limits, and a per-IP rate limit. None of
+// that stops a determined caller (origins can be spoofed outside a
+// browser) — the real ceiling is the monthly spend limit you set
+// in the Anthropic Console.
 //
-// Response (JSON): { html }  — a full <!doctype html> document.
-//   Any subject photo is referenced with the literal token {{PHOTO}};
-//   the client swaps it for the user's uploaded image.
+// Request  (POST JSON): { prompt, details?, referenceImage? }
+// Response (JSON):      { html }  — a full <!doctype html> document;
+//   a subject photo, if any, is the literal token {{PHOTO}}.
 // ============================================================
 
-const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
-const MODEL = "claude-opus-4-8";
+import Anthropic from "npm:@anthropic-ai/sdk";
 
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
+const MODEL = "claude-opus-5-5";
+const DEFAULT_ORIGINS = ["https://jiaoswal30.github.io", "http://localhost:8765", "http://127.0.0.1:8765"];
+const ORIGINS = (Deno.env.get("ALLOWED_ORIGINS") || "").split(",").map(s => s.trim()).filter(Boolean);
+const ALLOWED = ORIGINS.length ? ORIGINS : DEFAULT_ORIGINS;
+
+const LIMIT_PER_HOUR = 6;            // per IP, per warm instance (best effort)
+const MAX_PROMPT = 400;
+const MAX_FIELD = 90;
+const MAX_IMAGE_B64 = 1_500_000;     // ~1.1 MB image
+
+const client = new Anthropic({ apiKey: Deno.env.get("ANTHROPIC_API_KEY") });
 
 const FONTS_LINK =
-  `<link href="https://fonts.googleapis.com/css2?family=Anton&family=Shrikhand&family=Bebas+Neue&family=Archivo:wght@400;600;800;900&family=Unbounded:wght@600;800&family=Bricolage+Grotesque:opsz,wght@12..96,700;12..96,800&family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;1,9..144,500&family=Playfair+Display:ital,wght@0,600;1,600&family=Corinthia:wght@700&family=DM+Sans:wght@400;500;700&family=Space+Grotesk:wght@400;500;700&family=Noto+Sans+Devanagari:wght@400;700&display=swap" rel="stylesheet">`;
+  `<link href="https://fonts.googleapis.com/css2?family=Anton&family=Archivo:wdth,wght@62..125,500..900&family=Bodoni+Moda:ital,opsz,wght@0,6..96,400..700;1,6..96,400..700&family=IBM+Plex+Mono:wght@400;500;600&family=Schibsted+Grotesk:wght@400..800&family=Tiro+Devanagari+Hindi&display=swap" rel="stylesheet">`;
 
-function systemPrompt(): string {
-  return [
-    "You are an award-winning graphic designer. You produce ONE finished social-media invitation poster as a complete, self-contained HTML document.",
-    "",
-    "HARD CONSTRAINTS:",
-    "- Output ONLY the HTML document. Start with <!doctype html>. No prose, no markdown, no code fences.",
-    "- The root must render a fixed canvas exactly 1080px wide by 1350px tall (a 4:5 portrait). Size the outermost element to 1080x1350 with overflow hidden; the design fills it edge to edge.",
-    "- Use only inline CSS in <style> or style attributes. NO <script>. No external assets except the exact fonts <link> given below.",
-    `- Put this fonts link in <head> verbatim:\n${FONTS_LINK}`,
-    "- Available font families (use these, nothing else): Anton and Bebas Neue and Archivo Black and Unbounded and Bricolage Grotesque (bold display); Shrikhand (chunky characterful display); Fraunces and Playfair Display (editorial serif); Corinthia (flowing script); DM Sans and Space Grotesk (clean body/mono-ish); Noto Sans Devanagari (for जलसा / Hindi).",
-    "- If a subject photo belongs in the design, reference it with the LITERAL token {{PHOTO}} — e.g. <img src=\"{{PHOTO}}\"> or background-image:url('{{PHOTO}}'). Never invent an image URL. If no photo is needed, don't use the token.",
-    "",
-    "DESIGN BAR — this must look like a real designer made it, not a template:",
-    "- Trendy invite aesthetics: bold condensed display type (Druk/Anton feel), or elegant serif+script, or grainy nightlife, or halftone/collage. Pick what fits the event.",
-    "- Strong visual hierarchy: one dominant hero element, hard size/contrast steps, generous negative space. Never center-everything-evenly.",
-    "- Add real texture: a subtle film-grain or halftone overlay via an inline SVG data URI or CSS gradients. Avoid flat, sterile blocks.",
-    "- Type is the design. Mix weights and one script or serif accent. Tight, intentional tracking.",
-    "- Cohesive palette (3–4 colors). If a palette is supplied, honor it. Cream/paper grounds and neon-on-dark both read well.",
-    "- Include the event's title, host, date, time, and venue somewhere with clear hierarchy. Small mono/caps labels for details.",
-    "",
-    "If a REFERENCE IMAGE is attached: reproduce its layout, type treatment, color, and structure as closely as you can with the available fonts. Change only the words and the subject to match the event details. This is the priority when a reference is present.",
-  ].join("\n");
+const SYSTEM = `You are the in-house designer at jalsa, an invitation press in Bengaluru. You design ONE finished invitation poster as a complete, self-contained HTML document.
+
+Output rules
+- Output only the HTML document, starting with <!doctype html>. No prose, no markdown fences.
+- The design is a fixed canvas exactly 1080px wide and 1350px tall; size the outermost element to 1080x1350 with overflow hidden and fill it edge to edge.
+- Inline CSS only. No <script>, no external assets except this fonts link, verbatim, in <head>:
+${FONTS_LINK}
+- Fonts available: Bodoni Moda (high-contrast serif, with italics), Anton (condensed poster), Archivo (variable width 62–125, weights to 900), Schibsted Grotesk (sans), IBM Plex Mono, Tiro Devanagari Hindi (for Hindi words).
+- If a photograph belongs in the design, reference it with the literal token {{PHOTO}} (in an <img src> or a CSS url()). Never invent image URLs.
+
+The brief
+- Draw from a specific print tradition that suits this occasion: a letterpress card, a Sivakasi matchbox label, a cinema ticket, a riso zine, a telegram form, a gig poster, a wedding card from Chawri Bazaar, a railway timetable, a mithai-box label. Commit to one and make it convincing.
+- Type does the work. One dominant element, decisive size steps, real hierarchy, generous space. Avoid centring everything evenly.
+- Two to four colours, used with intent. Add texture through CSS or inline SVG (grain, halftone, misregistration) where the tradition calls for it.
+- Avoid the clichés of generic Indian design (mandalas, paisley fills, tricolour) and of generic event graphics (confetti, gradients on text, emoji, drop shadows on everything).
+- Include the title, host, date, time and venue with clear hierarchy. Spell every supplied detail exactly as given.
+- If a reference image is attached, follow its layout, type treatment and palette closely, swapping in this event's words.`;
+
+const hits = new Map<string, number[]>();
+function limited(ip: string): boolean {
+  const now = Date.now(), hour = 3_600_000;
+  const recent = (hits.get(ip) || []).filter(t => now - t < hour);
+  if (recent.length >= LIMIT_PER_HOUR) { hits.set(ip, recent); return true; }
+  recent.push(now);
+  hits.set(ip, recent);
+  return false;
 }
 
-function userContent(body: any): any[] {
-  const parts: any[] = [];
-  if (body.referenceImage?.data && body.referenceImage?.media_type) {
-    parts.push({
-      type: "image",
-      source: { type: "base64", media_type: body.referenceImage.media_type, data: body.referenceImage.data },
-    });
-  }
-  const d = body.details || {};
-  const pal = body.palette;
-  const lines = [
-    `Event brief: ${body.prompt || "a gathering"}`,
-    d.title ? `Title: ${d.title}` : "",
-    d.host ? `Host: ${d.host}` : "",
-    d.date ? `Date: ${d.date}` : "",
-    d.time ? `Time: ${d.time}` : "",
-    d.venue ? `Venue: ${d.venue}` : "",
-    pal ? `Palette to honor — background ${pal.bg}, text ${pal.ink}, accent ${pal.a}${pal.pop ? `, highlight ${pal.pop}` : ""}.` : "",
-    body.referenceImage ? "A reference design is attached — match it closely, swapping in the event details above." : "",
-    "Design the poster now. Output only the HTML document.",
-  ].filter(Boolean);
-  parts.push({ type: "text", text: lines.join("\n") });
-  return parts;
+const clip = (v: unknown, n: number) => String(v ?? "").replace(/[\u0000-\u001f]/g, " ").slice(0, n).trim();
+
+function cors(origin: string | null): Record<string, string> {
+  return {
+    "Access-Control-Allow-Origin": origin && ALLOWED.includes(origin) ? origin : ALLOWED[0],
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Vary": "Origin",
+  };
 }
 
-// Accumulate text from Anthropic's SSE stream.
-async function streamText(res: Response): Promise<string> {
-  const reader = res.body!.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let out = "";
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() || "";
-    for (const line of lines) {
-      if (!line.startsWith("data:")) continue;
-      const payload = line.slice(5).trim();
-      if (!payload || payload === "[DONE]") continue;
-      try {
-        const ev = JSON.parse(payload);
-        if (ev.type === "content_block_delta" && ev.delta?.type === "text_delta") {
-          out += ev.delta.text;
-        }
-      } catch { /* ignore keep-alive / partial */ }
-    }
-  }
-  return out;
+function reply(status: number, body: unknown, origin: string | null) {
+  return new Response(JSON.stringify(body), { status, headers: { ...cors(origin), "Content-Type": "application/json" } });
 }
 
 function cleanHtml(text: string): string {
-  let t = text.trim();
-  // strip accidental code fences
-  t = t.replace(/^```(?:html)?\s*/i, "").replace(/\s*```$/i, "").trim();
+  let t = text.trim().replace(/^```(?:html)?\s*/i, "").replace(/\s*```$/i, "").trim();
   const at = t.toLowerCase().indexOf("<!doctype");
   if (at > 0) t = t.slice(at);
-  return t;
+  // belt and braces: the client renders in a script-less sandbox anyway
+  return t.replace(/<script[\s\S]*?<\/script>/gi, "");
 }
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
-  if (req.method !== "POST") return new Response("Method not allowed", { status: 405, headers: CORS });
+  const origin = req.headers.get("origin");
+  if (req.method === "OPTIONS") return new Response("ok", { headers: cors(origin) });
+  if (req.method !== "POST") return reply(405, { error: "method_not_allowed" }, origin);
+  if (!origin || !ALLOWED.includes(origin)) return reply(403, { error: "origin_not_allowed" }, origin);
+  if (!Deno.env.get("ANTHROPIC_API_KEY")) return reply(500, { error: "not_configured", message: "The studio has no API key yet." }, origin);
 
-  const key = Deno.env.get("ANTHROPIC_API_KEY");
-  if (!key) {
-    return new Response(JSON.stringify({ error: "ANTHROPIC_API_KEY not set on the function" }), {
-      status: 500, headers: { ...CORS, "Content-Type": "application/json" },
-    });
-  }
+  const ip = (req.headers.get("x-forwarded-for") || "").split(",")[0].trim() || "unknown";
+  if (limited(ip)) return reply(429, { error: "rate_limited", message: "The studio is busy. Try again in a little while." }, origin);
 
   let body: any;
-  try { body = await req.json(); } catch { body = {}; }
+  try { body = await req.json(); } catch { return reply(400, { error: "bad_json" }, origin); }
 
-  const anthReq = {
-    model: MODEL,
-    max_tokens: 8000,
-    stream: true,
-    thinking: { type: "adaptive" },
-    output_config: { effort: "high" },
-    system: systemPrompt(),
-    messages: [{ role: "user", content: userContent(body) }],
-  };
+  const prompt = clip(body.prompt, MAX_PROMPT);
+  if (prompt.length < 4) return reply(400, { error: "empty_brief", message: "The brief is empty." }, origin);
+  const d = body.details || {};
+  const details = ["title", "host", "date", "time", "venue"]
+    .map(k => d[k] ? `${k[0].toUpperCase() + k.slice(1)}: ${clip(d[k], MAX_FIELD)}` : "")
+    .filter(Boolean);
+
+  const content: any[] = [];
+  const img = body.referenceImage;
+  if (img?.data && /^image\/(png|jpeg|webp|gif)$/.test(img.media_type || "")) {
+    if (String(img.data).length > MAX_IMAGE_B64) return reply(413, { error: "image_too_large", message: "That reference image is too large." }, origin);
+    content.push({ type: "image", source: { type: "base64", media_type: img.media_type, data: img.data } });
+  }
+  content.push({ type: "text", text: [`The brief, as the host wrote it: ${prompt}`, ...details, "Design the invitation now."].join("\n") });
 
   try {
-    const res = await fetch(ANTHROPIC_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": key,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify(anthReq),
-    });
+    const stream = client.beta.messages.stream({
+      model: MODEL,
+      max_tokens: 32000,
+      thinking: { type: "adaptive" },
+      output_config: { effort: "high" },
+      // on a safety decline, re-run on Anthropic's recommended fallback model
+      betas: ["server-side-fallback-2026-07-01"],
+      fallbacks: "default",
+      system: SYSTEM,
+      messages: [{ role: "user", content }],
+    } as any);
+    const msg = await stream.finalMessage();
 
-    if (!res.ok) {
-      const errText = await res.text();
-      return new Response(JSON.stringify({ error: "anthropic_error", status: res.status, detail: errText.slice(0, 500) }), {
-        status: 502, headers: { ...CORS, "Content-Type": "application/json" },
-      });
-    }
+    if (msg.stop_reason === "refusal") return reply(422, { error: "refused", message: "The studio couldn't take this brief. Try rewording it." }, origin);
+    if (msg.stop_reason === "max_tokens") return reply(502, { error: "truncated", message: "The design ran long. Try again." }, origin);
 
-    const raw = await streamText(res);
-    const html = cleanHtml(raw);
-    if (!html.toLowerCase().includes("<!doctype") && !html.toLowerCase().includes("<html")) {
-      return new Response(JSON.stringify({ error: "no_html", sample: html.slice(0, 300) }), {
-        status: 502, headers: { ...CORS, "Content-Type": "application/json" },
-      });
-    }
-    return new Response(JSON.stringify({ html }), {
-      headers: { ...CORS, "Content-Type": "application/json" },
-    });
+    const text = msg.content.filter((b: any) => b.type === "text").map((b: any) => b.text).join("");
+    const html = cleanHtml(text);
+    if (!/<html|<!doctype/i.test(html)) return reply(502, { error: "no_html", message: "The studio returned something that wasn't a design." }, origin);
+    return reply(200, { html }, origin);
   } catch (e) {
-    return new Response(JSON.stringify({ error: "exception", detail: String(e).slice(0, 500) }), {
-      status: 500, headers: { ...CORS, "Content-Type": "application/json" },
-    });
+    if (e instanceof Anthropic.RateLimitError) return reply(429, { error: "rate_limited", message: "The studio is busy. Try again in a minute." }, origin);
+    if (e instanceof Anthropic.APIError) return reply(502, { error: "upstream", status: e.status, message: "The studio is unavailable right now." }, origin);
+    return reply(500, { error: "exception", message: "Something went wrong in the studio." }, origin);
   }
 });
