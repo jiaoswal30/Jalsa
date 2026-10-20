@@ -91,4 +91,4 @@ To reset, go to the You tab and choose *Start over on this device*.
 
 ---
 
-Designed and built by Jia Oswal with Claude Code. Bengaluru, 2026.
+**Jalsa Press** · Prop. Jia Oswal · Est. Bengaluru, 2026

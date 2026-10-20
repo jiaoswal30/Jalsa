@@ -7,6 +7,6 @@
    ============================================================ */
 
 const CONFIG = {
-  SUPABASE_URL: "",   // e.g. "https://abcdefgh.supabase.co"
-  SUPABASE_KEY: "",   // the publishable key, "sb_publishable_…" — safe in client code
+  SUPABASE_URL: "https://tgyoqdcxfmkoipjzaqkx.supabase.co",
+  SUPABASE_KEY: "sb_publishable_cBT1YT1McOP3Eg9f_Se74w_XQ3Pe9gU",   // publishable: safe in client code, limited by row-level security
 };

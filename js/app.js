@@ -992,7 +992,7 @@
 
       <div class="section"><h2>Colophon</h2></div>
       <p class="prose">Set in Bodoni Moda, Schibsted Grotesk and IBM Plex Mono, with Tiro Devanagari for the जलसा. The six editions are drawn from Indian print: letterpress cards, Sivakasi matchbox labels, single-screen cinema tickets, riso zines, telegram forms and the Polaroid. Commissions are drawn by Claude.</p>
-      <p class="prose">Designed and built by Jia Oswal with Claude Code, Bengaluru, 2026.</p>
+      <p class="prose"><b>Jalsa Press.</b> Proprietor, compositor and night-shift printer: Jia Oswal. Est. Bengaluru, 2026.</p>
       <div class="pad" style="margin-top:22px">
         <div class="stack">
           <button class="btn btn-line" id="rename">Change your name</button>
