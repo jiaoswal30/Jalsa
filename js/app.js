@@ -563,8 +563,8 @@
         <div class="commission-cta"><div>
           <span class="lab">The studio · Nº 00</span>
           <b>Commission a one-off.</b>
-          <p>${AI.enabled ? "Claude draws a poster for this brief alone, not one of our six editions. It takes about a minute." : "Claude draws a poster for this brief alone. The studio opens once this copy of jalsa is connected to its cloud."}</p>
-          ${AI.enabled ? `<button class="btn btn-sm" id="commission" style="margin:0 auto">Commission it</button>` : `<span class="lab">Closed on this copy</span>`}
+          <p>${AI.enabled ? "Claude draws a poster for this brief alone, not one of our six editions. It takes about a minute." : "A poster drawn by Claude for this brief alone, rather than one of our six editions. The studio takes commissions by appointment."}</p>
+          ${AI.enabled ? `<button class="btn btn-sm" id="commission" style="margin:0 auto">Commission it</button>` : `<span class="lab">Studio closed · By appointment</span>`}
           ${st.commission && st.commission.error ? `<p style="margin:14px 0 0;color:#e9a08f">${esc(st.commission.error)}</p>` : ""}
         </div></div>
         <div class="proof-cap"><b>Commission</b><span class="lab">One-off</span></div>`;

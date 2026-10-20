@@ -9,4 +9,5 @@
 const CONFIG = {
   SUPABASE_URL: "https://tgyoqdcxfmkoipjzaqkx.supabase.co",
   SUPABASE_KEY: "sb_publishable_cBT1YT1McOP3Eg9f_Se74w_XQ3Pe9gU",   // publishable: safe in client code, limited by row-level security
+  STUDIO: false,      // AI commissions. Off: no API key is deployed, so nothing can be billed.
 };
